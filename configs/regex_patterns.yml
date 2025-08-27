@@ -1,0 +1,92 @@
+normalize:
+  crlf: "\\r\\n?"                                  # windows satır sonunu unix'e çevir
+  zw: "[\\u200B-\\u200D\\uFEFF]"                   # zero width karakterleri temizle
+  span: "[ \\t\\r\\f\\v]+"                         # satır içindeki fazla boşlukları tek boşluk yap
+#  many_newlines: "\\n{1,}"                         # 2 ve üstü boş satırı yakala
+  trailing: "[ \\t]+\\n"                           # satır sonundaki boşlukları at
+  dash: "[–—]"                                     # uzun tireleri '-' yap
+  strip_banner_regex: '^[\"“”]*\s*İçtihat\s+Metni\s*[\"“”]*$'  # bu satır görülürse tamamen at
+  nbsp:                                            # farklı boşluk türlerini normal boşluk yap
+    - "\\u00A0"
+    - "\\u202F"
+    - "\\u2007"
+  smart_quotes:                                    # akıllı tırnakları düz tırnak yap
+    - ["“","\""]
+    - ["”","\""]
+    - ["‘","'"]
+    - ["’","'"]
+  line_separators:                                 # özel satır ayırıcılarını \n yap
+    - "\\u2028"
+    - "\\u2029"
+  blank_collapse: "single"                         # "single" = tek boş satır bırak, "none" = hiç boş satır bırakma
+
+html:
+  script: "<\\s*script\\b[^>]*>.*?<\\/\\s*script\\s*>"   # script bloklarını at
+  style: "<\\s*style\\b[^>]*>.*?<\\/\\s*style\\s*>"     # style bloklarını at
+  br: "<\\s*br\\s*\\/??\\s*>"                           # <br> yerine yeni satır
+  block_open: "<\\s*(p|div|section|article|h\\d)\\b[^>]*>"   # açılış blok etiketi
+  block_close: "<\\/\\s*(p|div|section|article|h\\d)\\s*>"   # kapanış blok etiketi
+  tag: "<[^>]+>"                                        # diğer html tagları
+
+turkish:
+  spaced_word: "\\b(?:[A-Za-zÇĞİÖŞÜçğıöşü]\\s){2,}[A-Za-zÇĞİÖŞÜçğıöşü]\\b"   # m a h k e m e s i -> Mahkemesi
+  ordinal_dot_letter: "(\\d+)\\.(?=[A-Za-zÇĞİÖŞÜçğıöşü])"                   # 4.İcra -> 4. İcra
+
+date_normalize:
+  enabled: true                     # açık olursa tarihleri normalize et
+  normalize_in_text: true   # metnin kendisini değiştir
+  capture_column: true      # ayrıca yan kolona JSON olarak yaz
+  target: "dmy_dot"      # hepsi dd.mm.yyyy olsun (ör: 05.03.2020)
+  month_only_target: "iso_month"   # "Ocak 2008" -> 2008-01
+  keep_unparseable: true             # emin değilse bırak
+  assume_dmy: true                   # 18/09/2013 gibi sayısal tarihleri DMY varsay
+
+  patterns:
+    dmy_sep: "\\b(\\d{1,2})[./-](\\d{1,2})[./-](\\d{4})\\b"      # 18.09.2013 / 18-09-2013
+    dmy_text: "\\b(\\d{1,2})\\s+({MONTHS_RX})\\s+(\\d{4})\\b"    # 15 mayıs 2013 / 15 MAYIS 2013
+    my_text: "\\b({MONTHS_RX})\\s+(\\d{4})\\b"                   # ocak 2008 / AĞUSTOS 2011
+
+  months_tr:                       # varyantlar -> ay numarası
+    ocak:      "01"                # ocak
+    şubat:     "02"                # şubat / subat
+    subat:     "02"
+    mart:      "03"                # mart
+    nisan:     "04"                # nisan
+    mayıs:     "05"                # mayıs / mayis
+    mayis:     "05"
+    haziran:   "06"                # haziran
+    temmuz:    "07"                # temmuz
+    ağustos:   "08"                # ağustos / agustos
+    agustos:   "08"
+    eylül:     "09"                # eylül / eylul
+    eylul:     "09"
+    ekim:      "10"                # ekim
+    kasım:     "11"                # kasım / kasim
+    kasim:     "11"
+    aralık:    "12"                # aralık / aralik
+    aralik:    "12"
+
+segment:
+  section_headers:
+    baslik: ["^MAHKEMESİ:?","^DAİRESİ:?","^SAYISI:?","^KARAR:?","^ESAS:?"]
+    gerekce: ["^GEREKÇE\\b","^İNCELEME\\s+VE\\s+GEREKÇE\\b"]
+    hukum: ["^KARAR\\b","^HÜKÜM\\b","^SONUÇ\\b","^GEREĞİ DÜŞÜNÜLDÜ\\b"]
+
+  court:
+    header_line: "^MAHKEMESİ\\s*:\\s*(.+)$"         # başlıktaki satır
+    inline_hints:
+      - "\\b[A-ZÇĞİÖŞÜ0-9][^\\n]{0,80}?Mahkemesi\\b"
+      - "\\b[A-ZÇĞİÖŞÜ0-9][^\\n]{0,80}?Dairesi\\b"
+
+  case_type:
+    key_labels:
+      - "^DAVA\\s*TÜRÜ\\s*:\\s*(.+)$"
+      - "^DAVA\\s*KONUSU\\s*:\\s*(.+)$"
+      - "^KONU\\s*:\\s*(.+)$"
+    keywords: ["nafaka","boşanma","ziynet","işçilik","kira","tüketici","tazminat","alacak","velayet"]
+
+  docket:
+    generic: "\\b(\\d{4})\\/(\\d{1,6})\\b"
+    left_kw: "(Esas|E\\.)"
+    right_kw: "(Karar|K\\.)"
+    ctx_window: 12

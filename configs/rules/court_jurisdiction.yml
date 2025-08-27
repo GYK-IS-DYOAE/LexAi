@@ -1,0 +1,7 @@
+rules:
+  aile:
+    court: "Aile Mahkemesi"
+    note: "Yetki çoğunlukla taraflardan birinin yerleşim yeri."
+  borclar:
+    court: "Asliye Hukuk Mahkemesi"
+    note: "Genel görevli mahkeme."
