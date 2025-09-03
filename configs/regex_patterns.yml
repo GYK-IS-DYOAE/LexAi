@@ -68,15 +68,15 @@ date_normalize:
 
 segment:
   section_headers:
-    baslik: ["^MAHKEMESİ:?","^DAİRESİ:?","^SAYISI:?","^KARAR:?","^ESAS:?"]
+    baslik: ["^MAHKEMES[İI]\\s*:","^DAİRES[İI]\\s*:","^SAYISI\\s*:"]
     gerekce: ["^GEREKÇE\\b","^İNCELEME\\s+VE\\s+GEREKÇE\\b"]
     hukum: ["^KARAR\\b","^HÜKÜM\\b","^SONUÇ\\b","^GEREĞİ DÜŞÜNÜLDÜ\\b"]
-
+  
   court:
-    header_line: "^MAHKEMESİ\\s*:\\s*(.+)$"         # başlıktaki satır
+    # İsimli grup varsa (?P<court>...), kod onu kullanır; yoksa 1. grup kullanılır.
+    header_line: "(?im)^\\s*MAHKEMES[İI]\\s*:\\s*(?P<court>.+)$"
     inline_hints:
-      - "\\b[A-ZÇĞİÖŞÜ0-9][^\\n]{0,80}?Mahkemesi\\b"
-      - "\\b[A-ZÇĞİÖŞÜ0-9][^\\n]{0,80}?Dairesi\\b"
+      - "(?m)^(?!\\s*MAHKEMESİ\\s*:)(?P<court>(?:[A-Za-zÇĞİÖŞÜçğıöşü0-9\\.]+\\s+){0,5}(?:mahkemesi|mah\\.|dairesi|daire\\.)\\b)"
 
   case_type:
     key_labels:
