@@ -1,24 +1,23 @@
+# python src/etl/01_segment.py --in data/interim/kararlar_clean.jsonl --out data/interim/kararlar_segment.json --cfg configs/regex_patterns.yml
 import re, json, yaml, argparse
 from pathlib import Path
-import pandas as pd
-
+import pandas as pd  # sadece bağımlılık tutarlılığı için (kullanılmıyor)
 
 def load_config(path: str | Path) -> dict:
-    """YAML konfigürasyon dosyasını okur ve sözlük olarak döndürür."""
+    """YAML konfigürasyonunu okur ve döndürür."""
     return yaml.safe_load(Path(path).read_text(encoding="utf-8"))
-
 
 def compile_segment_patterns(cfg: dict) -> dict:
     """YAML’deki desenleri derler; bölüm başlıkları, mahkeme, dava türü ve dosya no şablonlarını döndürür."""
     seg = cfg["segment"]
     return {
         "sections": {
-            "baslik": [re.compile(p, re.I | re.M) for p in seg["section_headers"].get("baslik", [])],
+            "baslik":  [re.compile(p, re.I | re.M) for p in seg["section_headers"].get("baslik", [])],
             "gerekce": [re.compile(p, re.I | re.M) for p in seg["section_headers"].get("gerekce", [])],
             "hukum":   [re.compile(p, re.I | re.M) for p in seg["section_headers"].get("hukum", [])],
         },
         "court": {
-            "header_line": re.compile(seg["court"]["header_line"], re.I | re.M | re.U),
+            "header_line":  re.compile(seg["court"]["header_line"], re.I | re.M | re.U),
             "inline_hints": [re.compile(p, re.I | re.M | re.U) for p in seg["court"]["inline_hints"]],
         },
         "case_type": {
@@ -33,9 +32,8 @@ def compile_segment_patterns(cfg: dict) -> dict:
         }
     }
 
-
 def find_sections(text: str, sp: dict) -> dict:
-    """Başlık/gerekçe/hüküm aralıklarını döndürür; 'baslik' için ilk görünen blok seçilir."""
+    """Başlık/gerekçe/hüküm için en mantıklı blok sınırlarını bulur."""
     hits = []
     for label, regs in sp.items():
         for rx in regs:
@@ -64,9 +62,8 @@ def find_sections(text: str, sp: dict) -> dict:
             spans[label] = {"span": [start, end]}
     return spans
 
-
 def extract_header_court(text: str, header_span: list[int], cp: dict) -> dict:
-    """Başlıktaki 'MAHKEMESİ:' satırından mahkeme adını yakalar; isimli grup varsa (?P<court>) onu kullanır."""
+    """Başlıkta ‘MAHKEMESİ: …’ benzeri ifadeden mahkeme adını döndürür."""
     hs, he = header_span
     haystack = text[hs:he] if he > hs else text
     m = cp["header_line"].search(haystack)
@@ -75,12 +72,11 @@ def extract_header_court(text: str, header_span: list[int], cp: dict) -> dict:
     grp = "court" if "court" in m.re.groupindex else 1
     value = m.group(grp).strip()
     start = (hs + m.start(grp)) if he > hs else m.start(grp)
-    end   = (hs + m.end(grp))   if he > hs else m.end(grp)
+    end = (hs + m.end(grp)) if he > hs else m.end(grp)
     return {"MahkemeAdi": value, "span": [start, end]}
 
-
 def _normalize_court_key(s: str) -> str:
-    """Mahkeme adı karşılaştırmaları için sadeleştirilmiş anahtar üretir (Türkçe harfler korunur)."""
+    """Mahkeme adını karşılaştırma için normalize eder (kısaltmaları açar, boşlukları sadeleştirir)."""
     s = s.strip().lower()
     s = s.replace("mah.", "mahkemesi").replace("daire.", "dairesi")
     s = s.replace("başkanlığı", "")
@@ -88,17 +84,14 @@ def _normalize_court_key(s: str) -> str:
     s = re.sub(r"\s+", " ", s)
     return s.strip()
 
-
 def _overlaps(a: list[int], b: list[int]) -> bool:
-    """İki [start,end] aralığının çakışıp çakışmadığını döndürür."""
+    """İki [start,end] aralığının çakışıp çakışmadığını söyler."""
     return not (a[1] <= b[0] or b[1] <= a[0])
-
 
 _COURT_TAIL_RX = re.compile(r"(mahkemesi|mah\.|dairesi|daire\.)\b", re.I | re.U)
 
-
 def _trim_to_court_phrase(s: str, max_left_tokens: int = 5) -> str:
-    """Uzun eşleşmeyi yalnızca ‘… Mahkemesi / … Dairesi’ ifadesine indirger; numara/tarih/bağlaç gürültüsünü temizler."""
+    """Eşleşmeyi ‘… Mahkemesi / … Dairesi’ kalıbına indirger; gürültüyü atar."""
     m = _COURT_TAIL_RX.search(s)
     if not m:
         return s.strip()
@@ -110,18 +103,16 @@ def _trim_to_court_phrase(s: str, max_left_tokens: int = 5) -> str:
     keep = tokens[-max_left_tokens:]
     tail = s[m.start():end]
     tail = re.sub(r"\bmah\.\b", "Mahkemesi", tail, flags=re.I)
-    tail = re.sub(r"\bdaire\.\b", "Dairesi",   tail, flags=re.I)
+    tail = re.sub(r"\bdaire\.\b", "Dairesi", tail, flags=re.I)
     phrase = " ".join(keep + [tail])
     phrase = re.sub(r"\s+", " ", phrase).strip()
 
     def _tc(w: str) -> str:
         return w if w.isupper() and len(w) <= 4 else w.capitalize()
-
     return " ".join(_tc(w) for w in phrase.split())
 
-
 def extract_inline_courts(text: str, cp: dict, exclude_span: list[int] | None, header_value: str | None) -> list:
-    """Başlık aralığını hariç tutarak metin içinde geçen mahkeme adlarını liste olarak döndürür (dict yerine string)."""
+    """Başlık bölgesini hariç tutarak metinde geçen mahkeme adlarını (string olarak) listeler."""
     if exclude_span and exclude_span[1] > exclude_span[0]:
         ex = [max(0, exclude_span[0]-80), min(len(text), exclude_span[1]+80)]
     else:
@@ -143,23 +134,20 @@ def extract_inline_courts(text: str, cp: dict, exclude_span: list[int] | None, h
             if len(val.split()) > 8:
                 continue
             seen.add(key)
-            out.append(val)   # artık sadece string ekliyoruz
+            out.append(val)
     return out
 
-
-def extract_case_type(text: str, ctp: dict) -> dict:
-    """Etiketli dava türünü döndürür; yoksa anahtar kelimelerle tahmin listesi üretir."""
+def extract_case_type(text: str, ctp: dict) -> str | None:
+    """Etiketli dava türünü döndürür; yoksa None."""
     for rx in ctp["key_labels"]:
         m = rx.search(text)
         if m:
-            return {"DavaTuru": m.group(1).strip(), "span": [m.start(1), m.end(1)], "anahtarlar": []}
-    lowered = text.lower()
-    hits = [kw for kw in ctp["keywords"] if kw in lowered]
-    return {"DavaTuru": None, "span": [0, 0], "anahtarlar": hits}
-
+            return m.group(1).strip()
+    # anahtar kelime listesi istenmediğinden sadece None döndürüyoruz
+    return None
 
 def _classify_docket(text: str, start: int, end: int, dp: dict) -> str:
-    """20xx/xxxx ifadesini bağlama göre ‘esas’, ‘karar’ veya ‘diger’ olarak sınıflandırır."""
+    """20xx/xxxx ifadesini bağlamına göre sınıflandırır (‘esas’/‘karar’/‘diger’)."""
     L = max(0, start - dp["ctx_window"])
     R = min(len(text), end + dp["ctx_window"])
     left = text[L:start]
@@ -170,87 +158,87 @@ def _classify_docket(text: str, start: int, end: int, dp: dict) -> str:
         return "karar"
     return "diger"
 
-
 def extract_dockets(text: str, dp: dict) -> dict:
-    """Metindeki 20xx/xxxx referanslarını bularak {'yil','sira'} listeleri halinde döndürür (ham/span içermez)."""
-    out = {"MetinEsasListesi": [], "MetinKararListesi": [], "MetinDigerDosyaNoListesi": []}
+    """Metindeki 20xx/xxxx referanslarını ayrıştırır; yalnızca Esas listesini döndürür."""
+    out = {"MetinEsasListesi": []}
     for m in dp["generic"].finditer(text):
         year, seq = int(m.group(1)), int(m.group(2))
         cls = _classify_docket(text, m.start(), m.end(), dp)
-        item = {"yil": year, "sira": seq}
         if cls == "esas":
-            out["MetinEsasListesi"].append(item)
-        elif cls == "karar":
-            out["MetinKararListesi"].append(item)
-        else:
-            out["MetinDigerDosyaNoListesi"].append(item)
+            out["MetinEsasListesi"].append({"yil": year, "sira": seq})
     return out
 
+def iter_jsonl(path: str, limit: int | None = None, encoding: str = "utf-8-sig"):
+    """JSONL dosyasını satır satır okur; BOM varsa temizler, parse hatasında kaydı atlayıp devam eder."""
+    import sys
+    with open(path, "r", encoding=encoding) as f:
+        for i, line in enumerate(f, 1):
+            s = line.lstrip("\ufeff").strip()
+            if not s:
+                # boş satır
+                if limit and i >= limit:
+                    break
+                continue
+            try:
+                yield json.loads(s)
+            except json.JSONDecodeError as e:
+                print(f"[warn] JSONL parse atlandı (satır {i}): {e}", file=sys.stderr)
+            if limit and i >= limit:
+                break
 
-def run_segment(input_csv: str, output_csv: str, cfg_path: str, encoding: str = "utf-8-sig", limit: int | None = None) -> None:
-    """CSV’yi okur, alan çıkarımı yapar ve sonucu yeni CSV’ye yazar."""
+def run_segment(input_jsonl: str, output_json: str, cfg_path: str, encoding: str = "utf-8-sig", limit: int | None = None) -> None:
+    """JSONL girişten kayıtları okur, alan çıkarımı yapar ve sonuçları tek bir JSON dosyasına yazar."""
     cfg = load_config(cfg_path)
     pats = compile_segment_patterns(cfg)
-    df = pd.read_csv(input_csv, encoding=encoding)
-    if limit and limit > 0:
-        df = df.head(limit)
-    col = "Karar Metni"
 
-    mahkeme_adi, metin_ici_mahkemeler = [], []
-    dava_turu, dava_kw = [], []
-    metin_esas, metin_karar, metin_diger = [], [], []
+    results = []
+    for rec in iter_jsonl(input_jsonl, limit=limit, encoding=encoding):
+        txt = str(rec.get("Karar Metni", "") or "")
 
-    for txt in df[col].astype(str):
         sections = find_sections(txt, pats["sections"])
         header_span = sections.get("baslik", {}).get("span", [0, 0])
 
         court_hdr = extract_header_court(txt, header_span, pats["court"])
         exclude_span = court_hdr.get("span", [0, 0])
-        courts_inline = extract_inline_courts(txt, pats["court"], exclude_span, court_hdr["MahkemeAdi"])
 
+        courts_inline = extract_inline_courts(txt, pats["court"], exclude_span, court_hdr["MahkemeAdi"])
         ctype = extract_case_type(txt, pats["case_type"])
         docks = extract_dockets(txt, pats["docket"])
 
-        mahkeme_adi.append(court_hdr["MahkemeAdi"])
-        metin_ici_mahkemeler.append(courts_inline)
-        dava_turu.append(ctype["DavaTuru"])
-        dava_kw.append(ctype["anahtarlar"])
-        metin_esas.append(docks["MetinEsasListesi"])
-        metin_karar.append(docks["MetinKararListesi"])
-        metin_diger.append(docks["MetinDigerDosyaNoListesi"])
+        # Yeni alanları ekle (istenmeyen alanlar eklenmiyor; span hiç yazılmıyor)
+        rec["MahkemeAdi"] = court_hdr["MahkemeAdi"]
+        rec["MetinIciMahkemeler"] = courts_inline
+        rec["DavaTuru"] = ctype
+        rec["MetinEsasListesi"] = docks["MetinEsasListesi"]
 
-    df["MahkemeAdi"] = mahkeme_adi
-    df["MetinIciMahkemeler"] = metin_ici_mahkemeler
-    df["DavaTuru"] = dava_turu
-    df["DavaTuruAnahtarlar"] = dava_kw
-    df["MetinEsasListesi"] = metin_esas
-    df["MetinKararListesi"] = metin_karar
-    df["MetinDigerDosyaNoListesi"] = metin_diger
+        results.append(rec)
 
-    Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(output_csv, index=False, encoding=encoding)
-
+    Path(output_json).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_json, "w", encoding="utf-8") as f:
+        json.dump(results, f, ensure_ascii=False)
 
 def build_cli():
-    """Komut satırı argümanlarını tanımlar ve döndürür."""
+    """Komut satırı argümanlarını tanımlar."""
     p = argparse.ArgumentParser(prog="dyeoa-01-segment")
-    p.add_argument("--in", dest="inp", required=True)
-    p.add_argument("--out", dest="out", required=True)
-    p.add_argument("--cfg", dest="cfg", required=True)
-    p.add_argument("--encoding", default="utf-8-sig")
+    p.add_argument("--in", dest="inp", required=True, help="Girdi JSONL dosyası")
+    p.add_argument("--out", dest="out", required=True, help="Çıktı JSON dosyası")
+    p.add_argument("--cfg", dest="cfg", required=True, help="regex_patterns.yml")
+    p.add_argument("--encoding", default="utf-8-sig")  # geriye dönük parametre
     p.add_argument("--limit", type=int, default=None)
     return p
 
-
 def main():
-    """CLI’yi çalıştırır; dosyaları işler."""
+    """CLI’yi başlatır ve dosyaları işler."""
     p = build_cli()
     a = p.parse_args()
     run_segment(a.inp, a.out, a.cfg, a.encoding, a.limit)
 
-
 if __name__ == "__main__":
     main()
 
+#json
+#python src/etl/01_segment.py --in data/interim/kararlar_clean.jsonl --out data/interim/kararlar_segment.json --cfg configs/regex_patterns.yml
+#jsonl
+#python src/etl/01_segment.py --in data/interim/kararlar_clean.jsonl --out data/interim/kararlar_segment.jsonl --cfg configs/regex_patterns.yml
 
 #python src/etl/01_segment.py --in data/interim/kararlar_clean.csv --out data/interim/kararlar_segment.csv --cfg configs/regex_patterns.yml

@@ -19,6 +19,8 @@ normalize:
     - "\\u2028"
     - "\\u2029"
   blank_collapse: "single"                         # "single" = tek boş satır bırak, "none" = hiç boş satır bırakma
+  cut_until_court_header: true
+  
 
 html:
   script: "<\\s*script\\b[^>]*>.*?<\\/\\s*script\\s*>"   # script bloklarını at
