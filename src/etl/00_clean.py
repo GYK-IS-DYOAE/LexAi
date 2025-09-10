@@ -20,23 +20,20 @@ PLACEHOLDER_RE = re.compile(
 INCELENEN_RE = re.compile(r"(?mi)^\s*[İI]NCELENEN\s+KARAR(?:IN|ININ)?\b.*$")
 
 def load_config(config_path: str | Path) -> dict:
-    '''yaml dosyasını okuyup dict döndürür'''
+    """YAML dosyasını okuyup sözlük döndürür."""
     return yaml.safe_load(Path(config_path).read_text(encoding="utf-8"))
 
 def compile_patterns(cfg: dict) -> dict:
-    """YAML içindeki regexleri derler ve yardımcı listeleri hazırlar."""
+    """Konfigdeki regexleri derler ve yardımcı desenleri hazırlar."""
     n = cfg["normalize"]
     h = cfg["html"]
     tr = cfg["turkish"]
-
     seg = cfg.get("segment", {}).get("court", {})
     court_rx_str = seg.get("header_line") if isinstance(seg, dict) else None
     if court_rx_str:
-        court_rx_str = court_rx_str.lstrip("^")
-        court_header = re.compile(r"^\s*" + court_rx_str, re.I | re.M)
+        court_header = re.compile(court_rx_str)
     else:
-        court_header = re.compile(r"^\s*MAHKEMES[İIıi]\s*:\s*.*$", re.I | re.M)
-
+        court_header = re.compile(r"(?mi)^\s*MAHKEMES[İIıi]\s*:\s*.*$")
     return {
         "crlf": re.compile(n["crlf"]),
         "zero_width": re.compile(n["zw"]),
@@ -61,7 +58,7 @@ def compile_patterns(cfg: dict) -> dict:
     }
 
 def html_to_text(text: str, p: dict) -> str:
-    """HTML etiketlerini temizleyip entity’leri çözer."""
+    """HTML etiketlerini temizler ve entity’leri çözer."""
     if not text:
         return ""
     text = p["script_block"].sub("", text)
@@ -73,7 +70,7 @@ def html_to_text(text: str, p: dict) -> str:
     return html.unescape(text)
 
 def normalize_unicode_and_whitespace(text: str, p: dict) -> str:
-    """Unicode ve boşluk normalizasyonu yapar; boş satırları kaldırır."""
+    """Unicode ve boşlukları normalize eder, boş satırları azaltır."""
     if not text:
         return ""
     for sep in p.get("line_separators", []):
@@ -93,32 +90,29 @@ def normalize_unicode_and_whitespace(text: str, p: dict) -> str:
             lines.append(ln)
     return "\n".join(lines)
 
-def build_normalized_dates(captures: list) -> list:
-    """Yakalanan tüm normalize tarihleri tekilleştirip sıralı döndürür."""
+def _unique_preserve_order(seq):
+    """Sıralı tekilleştirme yapar."""
     seen = set()
     out = []
-    for row_caps in captures:
-        if not row_caps:
-            continue
-        for item in row_caps:
-            val = item.get("norm")
-            if val and val not in seen:
-                seen.add(val)
-                out.append(val)
+    for x in seq:
+        if x not in seen:
+            seen.add(x)
+            out.append(x)
     return out
 
 def build_normalized_dates_per_row(all_captures: list) -> list:
-    """Her satır için yalnız normalize tarih listesini döndürür."""
+    """Her satır için normalize edilmiş, sıralı ve tekil tarih listesi döndürür."""
     out = []
-    for row_caps in all_captures:
+    for row_caps in all_captures or []:
         if not row_caps:
             out.append([])
         else:
-            out.append([item["norm"] for item in row_caps if "norm" in item])
+            norms = [item.get("norm") for item in row_caps if item.get("norm")]
+            out.append(_unique_preserve_order(norms))
     return out
 
 def normalize_dates_in_text(text: str, cfg: dict) -> tuple[str, list]:
-    """Metindeki tarihleri yakalar; ayarlıysa normalize edip hem metne uygular hem liste döndürür."""
+    """Metindeki tarihleri yakalar ve ayara göre metin içinde hedef formata çevirir."""
     dn = cfg.get("date_normalize", {})
     if not dn or not dn.get("enabled", False):
         return text, []
@@ -167,7 +161,7 @@ def normalize_dates_in_text(text: str, cfg: dict) -> tuple[str, list]:
     return text, captures
 
 def _strip_banner_lines(text: str, banner_rx: str | None) -> str:
-    """Banner satırlarını (örn. İçtihat Metni) tamamen kaldırır."""
+    """Banner satırlarını tamamen kaldırır."""
     if not banner_rx:
         return text
     rx = re.compile(banner_rx, flags=re.I)
@@ -179,7 +173,7 @@ def _strip_banner_lines(text: str, banner_rx: str | None) -> str:
     return "\n".join(lines)
 
 def cut_until_court_header(text: str, p: dict) -> str:
-    """Metni ilk 'MAHKEMESİ:' başlığından itibaren kırpar; yoksa değiştirmez ve baştaki boşlukları temizler."""
+    """İlk 'MAHKEMESİ:' başlığından itibaren kırpar; yoksa olduğu gibi bırakır."""
     cand = []
     rx1 = p.get("court_header")
     rx2 = p.get("court_header_simple")
@@ -195,7 +189,6 @@ def cut_until_court_header(text: str, p: dict) -> str:
         return text.lstrip()
     start = min(cand)
     return text[start:].lstrip()
-
 
 def fix_spaced_letters(text: str, p: dict) -> str:
     """Aralıklı harflerden oluşan kelimeleri birleştirir."""
@@ -213,7 +206,7 @@ def normalize_colon_spacing(text: str) -> str:
     return text
 
 def clean_text(text: str, patterns: dict, cfg: dict) -> tuple[str, list]:
-    """Metni temizler, başlık satırlarını kaldırır, 'MAHKEMESİ:' öncesini keser, tarihleri yakalar ve normalize eder."""
+    """Metni temizler, opsiyonel kırpar ve tarihleri normalize eder."""
     if text is None:
         return "", []
     if not isinstance(text, (list, dict, set, tuple)) and pd.isna(text):
@@ -222,25 +215,20 @@ def clean_text(text: str, patterns: dict, cfg: dict) -> tuple[str, list]:
         return "", []
     if not isinstance(text, str):
         text = str(text)
-
     text = html_to_text(text, patterns)
     text = normalize_unicode_and_whitespace(text, patterns)
-
     rx = cfg.get("normalize", {}).get("strip_banner_regex")
     if rx:
         text = _strip_banner_lines(text, rx)
     text = INCELENEN_RE.sub("", text)
-    text = cut_until_court_header(text, patterns)
-
+    if cfg.get("normalize", {}).get("cut_until_court_header", True):
+        text = cut_until_court_header(text, patterns)
     text = fix_spaced_letters(text, patterns)
     text = fix_ordinal_dot_letter(text, patterns)
     text = normalize_colon_spacing(text)
-
     text, date_caps = normalize_dates_in_text(text, cfg)
-
     if PLACEHOLDER_RE.search(text):
         text = ""
-
     text = text.strip()
     return text, date_caps
 
@@ -273,14 +261,14 @@ def null_report(df: pd.DataFrame, out_csv: str | None = None) -> pd.DataFrame:
     return summary
 
 def blank_mask_for_series(s: pd.Series) -> pd.Series:
-    """Bir seride NaN, boş string veya nan/null/none/na stringlerini True yapan maske üretir."""
+    """Boş kabul edilen değerler için maske üretir."""
     return s.isna() | s.map(lambda x: isinstance(x, str) and x.strip().lower() in {"", "nan", "null", "none", "na"})
 
 def run_clean(input_csv: str, output_csv: str, cfg_path: str,
               encoding: str = "utf-8-sig",
               limit: int | None = None,
               null_report_csv: str | None = None) -> None:
-    """CSV’yi okur, Karar Metni’ni temizler, tarih kolonlarını ekler, zorunlu kolonlardan biri boşsa satırı siler ve özeti üretir."""
+    """CSV’yi okur, metni temizler, tarih kolonunu ekler ve JSONL olarak yazar."""
     cfg = load_config(cfg_path)
     patterns = compile_patterns(cfg)
     df = pd.read_csv(input_csv, encoding=encoding)
@@ -295,8 +283,6 @@ def run_clean(input_csv: str, output_csv: str, cfg_path: str,
         cleaned.append(t)
         all_captures.append(caps)
     df[col] = cleaned
-    if cfg.get("date_normalize", {}).get("capture_column", True):
-        df["TespitEdilenTarihler"] = all_captures
     df["KararIlgiliTarihler"] = build_normalized_dates_per_row(all_captures)
     present_required = [c for c in REQUIRED_COLS if c in df.columns]
     if present_required:
@@ -304,8 +290,10 @@ def run_clean(input_csv: str, output_csv: str, cfg_path: str,
         for c in present_required:
             bad_any = bad_any | blank_mask_for_series(df[c])
         df = df[~bad_any].copy()
-    Path(output_csv).parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(output_csv, index=False, encoding=encoding)
+    p = Path(output_csv)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    s = df.to_json(orient="records", lines=True, force_ascii=False)
+    p.write_text(s, encoding=encoding)
     null_report(df, null_report_csv)
 
 def build_cli() -> argparse.ArgumentParser:
@@ -327,6 +315,13 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
+
+#jsonl
+#python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.jsonl --cfg configs/regex_patterns.yml --limit 5000 
+#json
+#python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.json --cfg configs/regex_patterns.yml
+
 
 # python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.csv --limit 5000 --cfg configs/regex_patterns.yml --null-report data/interim/boşluk_özeti.csv
 #python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.csv --limit 5000 --cfg configs/regex_patterns.yml
