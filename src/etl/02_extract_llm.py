@@ -28,8 +28,6 @@ from pathlib import Path
 from openai import OpenAI
 
 
-# ============================ Yardımcılar ============================
-
 def ensure_dir(p: Path):
     """Verilen yolun dizinlerini (yoksa) oluşturur."""
     p.mkdir(parents=True, exist_ok=True)
@@ -140,7 +138,7 @@ def _iter_records_any(path: Path, limit: int | None = None, encoding: str = "utf
             head = ch
             break
 
-    # JSON (liste) dosyası
+    # JSON dosyası
     if head == "[":
         data = json.loads(path.read_text(encoding=encoding))
         count = 0
@@ -237,9 +235,6 @@ def _write_tasks_chunked(
 
     return parts
 
-
-# ============================ Komutlar ============================
-
 def cmd_submit_serial(args):
     """Parçaları sırayla gönderir; her batch tamamlanınca çıktı dosyasına yazar ve sonra sıradakine geçer (tek aktif batch)."""
     client = OpenAI(api_key=load_api_key())
@@ -253,12 +248,10 @@ def cmd_submit_serial(args):
 
     ensure_dir(debug_dir)
 
-    # Daha önce işlenen/gönderilenleri atla
     done_ids: Set[str] = set(read_lines(done_path))
     already_submitted: Set[str] = set(read_lines(submitted_path))
     system_prompt = load_system_prompt(args.prompt)
 
-    # Girdiyi sıraya hazırla
     pairs: List[Tuple[str, str]] = []
     for i, obj in enumerate(_iter_records_any(input_path, limit=args.limit or None, encoding="utf-8-sig"), 1):
         _id = str(obj.get(args.id_field, i))
@@ -277,7 +270,6 @@ def cmd_submit_serial(args):
         print("[submit-serial] Gönderilecek kayıt yok.")
         return
 
-    # 1000'lik (veya verilen) parçalara böl: split = ceil(n/chunk_size)
     n = len(pairs)
     chunk_size = max(1, int(args.chunk_size))
     split = max(1, ceil(n / chunk_size))
@@ -294,7 +286,6 @@ def cmd_submit_serial(args):
 
     results_path = out_dir / "02_extract_llm.jsonl"
 
-    # Parçaları sırayla gönder → tamamlanınca sonuçları yaz → sonraki parçaya geç
     for idx, (path, ids) in enumerate(parts, 1):
         print(f"[submit-serial] ({idx}/{len(parts)}) gönderiliyor: {path.name} (kayıt={len(ids)})")
         up = client.files.create(file=open(path, "rb"), purpose="batch")
@@ -317,7 +308,6 @@ def cmd_submit_serial(args):
                 break
             time.sleep(args.check_interval)
 
-        # Sonuçları indir ve güvenli yaz
         new_completed: Set[str] = set()
         new_failed: Set[str] = set()
 
@@ -391,7 +381,6 @@ def cmd_resume(args):
 
     ensure_dir(debug_dir)
 
-    # 1) Kalan ID havuzunu topla
     remaining_ids: List[str] = _gather_remaining_ids(
         debug_dir=debug_dir,
         batch_id=args.batch_id if not args.all_remaining else None,
@@ -404,7 +393,6 @@ def cmd_resume(args):
 
     print(f"[resume] havuz büyüklüğü: {len(remaining_ids)} id")
 
-    # 2) Girdiden bu ID'lere ait metinleri seç
     system_prompt = load_system_prompt(args.prompt)
     want: Set[str] = set(remaining_ids)
     sel: Dict[str, str] = {}
@@ -427,7 +415,6 @@ def cmd_resume(args):
     if not sel:
         sys.exit("[resume] remaining kayıtlar girdide bulunamadı.")
 
-    # 3) Yeniden PARÇALA: chunk-size'a göre yeni küçük batch dosyaları oluştur
     ids_text_pairs = list(sel.items())  # [(id, text), ...]
     n = len(ids_text_pairs)
     chunk_size = max(1, int(args.chunk_size))
@@ -445,7 +432,6 @@ def cmd_resume(args):
 
     results_path = out_dir / "02_extract_llm.jsonl"
 
-    # 4) Parçaları SIRAYLA gönder → tamamlanınca yaz → sıradaki
     for idx, (path, ids) in enumerate(parts, 1):
         print(f"[resume] ({idx}/{len(parts)}) gönderiliyor: {path.name} (kayıt={len(ids)})")
         up = client.files.create(file=open(path, "rb"), purpose="batch")
@@ -454,7 +440,6 @@ def cmd_resume(args):
         append_lines(batch_id_path, [job.id])
         append_lines(submitted_path, ids)
 
-        # Bu YENİ resume batch'i için ayrı remaining başlangıcı
         new_remaining_path = debug_dir / f"remaining_ids_{job.id}.txt"
         write_lines_atomic(new_remaining_path, ids)
 
@@ -469,7 +454,6 @@ def cmd_resume(args):
                 break
             time.sleep(args.check_interval)
 
-        # Sonuçları indir ve güvenli yaz
         new_completed: Set[str] = set()
         new_failed: Set[str] = set()
 
@@ -498,14 +482,12 @@ def cmd_resume(args):
                 except Exception:
                     pass
 
-        # done_ids güncelle
         done_path = debug_dir / "done_ids.txt"
         if new_completed:
             di = set(read_lines(done_path))
             di |= new_completed
             write_lines_atomic(done_path, sorted(di))
 
-        # Bu yeni resume batch'inin remaining'i güncelle
         submitted_ids_for_this_batch = set(read_lines(new_remaining_path))
         remaining_now = sorted(list(submitted_ids_for_this_batch - new_completed))
         write_lines_atomic(new_remaining_path, remaining_now)
@@ -519,9 +501,6 @@ def cmd_resume(args):
         }, ensure_ascii=False, indent=2))
 
     print("[resume] tüm remaining parçaları sırayla yeniden gönderildi ve toplandı.")
-
-
-# ============================ CLI ============================
 
 def main():
     """Komut satırı arayüzünü başlatır ve ilgili komutu çalıştırır (submit-serial, resume)."""
@@ -537,7 +516,7 @@ def main():
     common.add_argument("--id-field", default="Id", help="Girdi Id alanı (vars: 'Id')")
     common.add_argument("--text-field", default="Karar Metni", help="LLM'e gidecek metin alanı (vars: 'Karar Metni')")
 
-    # submit-serial: sırayla gönder, tamamlanınca topla
+    # submit-serial
     p_sserial = sub.add_parser("submit-serial", parents=[common],
                                help="Parçaları sırayla gönderir; her parça tamamlanınca sonucu yazar ve sonra sıradakine geçer")
     p_sserial.add_argument("--limit", type=int, default=0, help="Opsiyonel: ilk N kaydı oku")
@@ -546,7 +525,7 @@ def main():
     p_sserial.add_argument("--check-interval", type=int, default=60, help="Durum kontrol aralığı (sn)")
     p_sserial.set_defaults(func=cmd_submit_serial)
 
-    # resume: kalan/fail havuzunu tekrar küçük batch'lere bölerek seri gönder
+    # resume
     p_resume = sub.add_parser("resume", parents=[common],
                               help="Kalan/fail kayıt havuzunu chunk-size ile yeniden parçalayıp seri olarak gönderir")
     p_resume.add_argument("--batch-id", help="Sadece bu batch'in remaining kayıtlarını al")
@@ -565,7 +544,6 @@ if __name__ == "__main__":
 
 #submit-serial
 #python src/etl/02_extract_llm.py submit-serial --in data/interim/kararlar_segment.jsonl --chunk-size 1000 --max-bytes 160000000 --check-interval 60
-
 
 #resume
 # tek bir batch’in kalanları

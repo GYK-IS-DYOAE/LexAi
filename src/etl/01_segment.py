@@ -172,9 +172,6 @@ def extract_dockets(text: str, dp: dict) -> list[str]:
             out.append(val)
     return out
 
-# ---------------------------
-# I/O yardımcıları (format algılama, okuma, yazma)
-# ---------------------------
 def _infer_format_from_path(path: str) -> str:
     suf = Path(path).suffix.lower()
     if suf == ".jsonl": return "jsonl"
@@ -264,8 +261,6 @@ def _write_output(records: list[dict], out_path: str, encoding: str):
         return
 
     raise ValueError(f"Bilinmeyen çıktı formatı: {fmt}")
-
-# ---------------------------
 
 def run_segment(input_path: str, output_path: str, cfg_path: str, encoding: str = "utf-8-sig", limit: int | None = None) -> None:
     """Girdiyi okur, alan çıkarımı yapar ve sonucu seçilen formatta yazar."""
