@@ -1,7 +1,8 @@
 # python src/etl/01_segment.py --in data/interim/kararlar_clean.jsonl --out data/interim/kararlar_segment.json --cfg configs/regex_patterns.yml
 import re, json, yaml, argparse
 from pathlib import Path
-import pandas as pd  # sadece bağımlılık tutarlılığı için (kullanılmıyor)
+import pandas as pd  # csv girdi/çıktı için
+import csv
 
 def load_config(path: str | Path) -> dict:
     """YAML konfigürasyonunu okur ve döndürür."""
@@ -143,7 +144,6 @@ def extract_case_type(text: str, ctp: dict) -> str | None:
         m = rx.search(text)
         if m:
             return m.group(1).strip()
-    # anahtar kelime listesi istenmediğinden sadece None döndürüyoruz
     return None
 
 def _classify_docket(text: str, start: int, end: int, dp: dict) -> str:
@@ -158,26 +158,38 @@ def _classify_docket(text: str, start: int, end: int, dp: dict) -> str:
         return "karar"
     return "diger"
 
-def extract_dockets(text: str, dp: dict) -> dict:
-    """Metindeki 20xx/xxxx referanslarını ayrıştırır; yalnızca Esas listesini döndürür."""
-    out = {"MetinEsasListesi": []}
+def extract_dockets(text: str, dp: dict) -> list[str]:
+    """Metindeki 20xx/xxxx referanslarını ayrıştırır; yalnızca Esas’ları 'YYYY/NNNN' listesi olarak döndürür."""
+    seen, out = set(), []
     for m in dp["generic"].finditer(text):
-        year, seq = int(m.group(1)), int(m.group(2))
         cls = _classify_docket(text, m.start(), m.end(), dp)
-        if cls == "esas":
-            out["MetinEsasListesi"].append({"yil": year, "sira": seq})
+        if cls != "esas":
+            continue
+        yil, sira = m.group(1), m.group(2)
+        val = f"{int(yil):04d}/{int(sira)}"
+        if val not in seen:
+            seen.add(val)
+            out.append(val)
     return out
 
-def iter_jsonl(path: str, limit: int | None = None, encoding: str = "utf-8-sig"):
-    """JSONL dosyasını satır satır okur; BOM varsa temizler, parse hatasında kaydı atlayıp devam eder."""
+# ---------------------------
+# I/O yardımcıları (format algılama, okuma, yazma)
+# ---------------------------
+def _infer_format_from_path(path: str) -> str:
+    suf = Path(path).suffix.lower()
+    if suf == ".jsonl": return "jsonl"
+    if suf == ".json":  return "json"
+    if suf == ".csv":   return "csv"
+    return "jsonl"
+
+def _iter_jsonl(path: str, limit: int | None = None, encoding: str = "utf-8-sig"):
+    """JSONL dosyasını satır satır okur; BOM ve parse hatalarını tolere eder."""
     import sys
     with open(path, "r", encoding=encoding) as f:
         for i, line in enumerate(f, 1):
             s = line.lstrip("\ufeff").strip()
             if not s:
-                # boş satır
-                if limit and i >= limit:
-                    break
+                if limit and i >= limit: break
                 continue
             try:
                 yield json.loads(s)
@@ -186,13 +198,82 @@ def iter_jsonl(path: str, limit: int | None = None, encoding: str = "utf-8-sig")
             if limit and i >= limit:
                 break
 
-def run_segment(input_jsonl: str, output_json: str, cfg_path: str, encoding: str = "utf-8-sig", limit: int | None = None) -> None:
-    """JSONL girişten kayıtları okur, alan çıkarımı yapar ve sonuçları tek bir JSON dosyasına yazar."""
+def _read_input(inp: str, encoding: str, limit: int | None):
+    fmt = _infer_format_from_path(inp)
+    if fmt == "jsonl":
+        return list(_iter_jsonl(inp, limit=limit, encoding=encoding))
+    if fmt == "json":
+        data = json.loads(Path(inp).read_text(encoding=encoding))
+        if isinstance(data, dict):
+            data = data.get("records") or data.get("data") or []
+        if limit:
+            data = data[:limit]
+        return data
+    if fmt == "csv":
+        df = pd.read_csv(inp, encoding=encoding)
+        if limit:
+            df = df.head(limit)
+        return df.to_dict(orient="records")
+    return list(_iter_jsonl(inp, limit=limit, encoding=encoding))
+
+def _csv_friendly(v):
+    """CSV’de liste/dict değerleri JSON stringe çevir."""
+    if isinstance(v, (list, dict)):
+        return json.dumps(v, ensure_ascii=False)
+    return v
+
+PREFERRED_ORDER = ["Id", "Daire", "Esas No", "Karar No", "Tarih", "Karar Metni",
+                   "MahkemeAdi", "MetinIciMahkemeler", "DavaTuru", "MetinEsasListesi"]
+
+def _order_keys(obj: dict) -> dict:
+    head = {k: obj[k] for k in PREFERRED_ORDER if k in obj}
+    tail = {k: v for k, v in obj.items() if k not in head}
+    return {**head, **tail}
+
+
+def _write_output(records: list[dict], out_path: str, encoding: str):
+    fmt = _infer_format_from_path(out_path)
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "jsonl":
+        with open(p, "w", encoding=encoding) as f:
+            for rec in records:
+                f.write(json.dumps(_order_keys(rec), ensure_ascii=False) + "\n")
+        return
+
+    if fmt == "json":
+        with open(p, "w", encoding=encoding) as f:
+            json.dump([_order_keys(r) for r in records], f, ensure_ascii=False)
+        return
+
+
+    if fmt == "csv":
+        if not records:
+            pd.DataFrame().to_csv(p, index=False, encoding="utf-8-sig")
+            return
+        df = pd.DataFrame(records)
+        if "Sira" in df.columns:
+            df = df.drop(columns=["Sira"])
+        cols = (["Id"] if "Id" in df.columns else []) + [c for c in df.columns if c != "Id"]
+        df = df[cols]
+        for col in df.columns:
+            df[col] = df[col].map(_csv_friendly)
+        df.to_csv(p, index=False, encoding="utf-8-sig",
+                  quoting=csv.QUOTE_MINIMAL, lineterminator="\n")
+        return
+
+    raise ValueError(f"Bilinmeyen çıktı formatı: {fmt}")
+
+# ---------------------------
+
+def run_segment(input_path: str, output_path: str, cfg_path: str, encoding: str = "utf-8-sig", limit: int | None = None) -> None:
+    """Girdiyi okur, alan çıkarımı yapar ve sonucu seçilen formatta yazar."""
     cfg = load_config(cfg_path)
     pats = compile_segment_patterns(cfg)
 
     results = []
-    for rec in iter_jsonl(input_jsonl, limit=limit, encoding=encoding):
+    for idx, rec in enumerate(_read_input(input_path, encoding=encoding, limit=limit), start=1):
         txt = str(rec.get("Karar Metni", "") or "")
 
         sections = find_sections(txt, pats["sections"])
@@ -203,27 +284,27 @@ def run_segment(input_jsonl: str, output_json: str, cfg_path: str, encoding: str
 
         courts_inline = extract_inline_courts(txt, pats["court"], exclude_span, court_hdr["MahkemeAdi"])
         ctype = extract_case_type(txt, pats["case_type"])
-        docks = extract_dockets(txt, pats["docket"])
+        metin_esas_listesi = extract_dockets(txt, pats["docket"])
 
-        # Yeni alanları ekle (istenmeyen alanlar eklenmiyor; span hiç yazılmıyor)
+        rec["Id"] = idx
+        if "Sira" in rec:
+            del rec["Sira"]
         rec["MahkemeAdi"] = court_hdr["MahkemeAdi"]
         rec["MetinIciMahkemeler"] = courts_inline
         rec["DavaTuru"] = ctype
-        rec["MetinEsasListesi"] = docks["MetinEsasListesi"]
+        rec["MetinEsasListesi"] = metin_esas_listesi
 
         results.append(rec)
 
-    Path(output_json).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_json, "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False)
+    _write_output(results, output_path, encoding)
 
 def build_cli():
     """Komut satırı argümanlarını tanımlar."""
-    p = argparse.ArgumentParser(prog="dyeoa-01-segment")
-    p.add_argument("--in", dest="inp", required=True, help="Girdi JSONL dosyası")
-    p.add_argument("--out", dest="out", required=True, help="Çıktı JSON dosyası")
+    p = argparse.ArgumentParser(prog="LexAi-01-segment")
+    p.add_argument("--in", dest="inp", required=True, help="Girdi dosyası (.jsonl/.json/.csv)")
+    p.add_argument("--out", dest="out", required=True, help="Çıktı dosyası (.jsonl/.json/.csv)")
     p.add_argument("--cfg", dest="cfg", required=True, help="regex_patterns.yml")
-    p.add_argument("--encoding", default="utf-8-sig")  # geriye dönük parametre
+    p.add_argument("--encoding", default="utf-8-sig")
     p.add_argument("--limit", type=int, default=None)
     return p
 
@@ -236,9 +317,10 @@ def main():
 if __name__ == "__main__":
     main()
 
+
 #json
 #python src/etl/01_segment.py --in data/interim/kararlar_clean.jsonl --out data/interim/kararlar_segment.json --cfg configs/regex_patterns.yml
 #jsonl
 #python src/etl/01_segment.py --in data/interim/kararlar_clean.jsonl --out data/interim/kararlar_segment.jsonl --cfg configs/regex_patterns.yml
-
+#csv
 #python src/etl/01_segment.py --in data/interim/kararlar_clean.csv --out data/interim/kararlar_segment.csv --cfg configs/regex_patterns.yml

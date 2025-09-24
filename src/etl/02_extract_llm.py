@@ -1,209 +1,575 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
 """
-02_extract_llm.py
------------------
-Amaç:
-- data/interim/kararlar_segment.csv dosyasını okur.
-- Her satırın "Karar Metni" kolonunu LLM'e (Ollama üzerinden Qwen2.5) verir.
-- LLM'in çıkardığı alanları Pydantic şemasıyla doğrular.
-- ÇIKTI: data/interim/02_extract_llm.jsonl
-  * meta (CSV'den seçilmiş temel alanlar)
-  * record (LLM çıkarımları)
-  * source_csv (CSV satırının TÜM orijinal sütunları)  <<<<<< ÖNEMLİ
+OpenAI Batch seri orkestratör (iki alt-komut: submit-serial, resume)
+
+- submit-serial: Girdiyi chunk-size (vars 1000) ile parçalara böler, her parçayı
+  TEK TEK gönderir; batch TAMAMLANINCA sonuçları 02_extract_llm.jsonl'a ekler,
+  done/remaining dosyalarını atomik güncelleyip SONRA sıradaki parçaya geçer.
+  (Paralel gönderim yok; collect gereksiz.)
+
+- resume: Kalan/fail kayıt havuzunu seçer (tek batch id veya tüm remaining),
+  sonra bu havuzu chunk-size ile yeniden parçalayıp YİNE SERİ şekilde
+  batch-batch gönderir. Her batch tamamlanınca sonuçlar yazılır ve devam edilir.
+  (Böylece "40k remaining'i tek seferde gönderme" sorunu olmaz.)
+
+Varsayılan yollar:
+  Girdi:   data/interim/kararlar_segment.jsonl
+  Çıktı:   data/interim/02_extract_llm.jsonl
+  Debug:   data/interim/debug/{batch_id.txt,submitted_ids.txt,done_ids.txt,remaining_ids_*.txt}
+  Prompt:  src/llm/prompts/extract_system.md
 """
 
-import json, time, sys
+import sys, os, json, argparse, time, tempfile
+from typing import Iterable, List, Dict, Set, Tuple, Generator
+from math import ceil
 from pathlib import Path
-from typing import List, Optional
-from pydantic import BaseModel, Field, ValidationError
-import requests
-import csv
+from openai import OpenAI
 
-# ------------------ Ayarlar ------------------
-SYSTEM_PROMPT_FILE = Path("src/llm/prompts/extract_system.md")
-system_prompt = SYSTEM_PROMPT_FILE.read_text(encoding="utf-8")
 
-OLLAMA_URL = "http://localhost:11434/api/chat"
-MODEL_NAME = "qwen2.5:3b-instruct"  # yoksa: `ollama pull qwen2.5:7b-instruct`
+# ============================ Yardımcılar ============================
 
-# ------------------ Şema ---------------------
-class KanunAtifi(BaseModel):
-    """Kanun atıfları için şema."""
-    kanun: Optional[str] = None
-    madde: Optional[str] = None
-    fikra: Optional[str] = None
-    span: Optional[str] = None
+def ensure_dir(p: Path):
+    """Verilen yolun dizinlerini (yoksa) oluşturur."""
+    p.mkdir(parents=True, exist_ok=True)
 
-class Adim(BaseModel):
-    """Karar sürecindeki adımlar için şema (kronolojik)."""
-    ad: str
-    ozet: Optional[str] = None
-    spans: List[str] = Field(default_factory=list)
+def read_lines(p: Path) -> List[str]:
+    """Bir metin dosyasındaki satırları kırparak okur; dosya yoksa boş liste döner."""
+    if not p.exists():
+        return []
+    return [x.strip() for x in p.read_text(encoding="utf-8").splitlines() if x.strip()]
 
-class RecordOut(BaseModel):
-    """LLM çıkarım kaydı şeması."""
-    dava_turu: Optional[str] = None
-    alt_dava_turleri: List[str] = Field(default_factory=list)
-    taraf_iliskisi: Optional[str] = None
-    sonuc: Optional[str] = None
-    kanun_atiflari: List[KanunAtifi] = Field(default_factory=list)
-    deliller: List[str] = Field(default_factory=list)
-    talepler: List[str] = Field(default_factory=list)
-    gecici_tedbirler: List[str] = Field(default_factory=list)
-    basvuru_yolu: Optional[str] = None
-    onemli_tarihler: List[dict] = Field(default_factory=list)
-    miktarlar: List[dict] = Field(default_factory=list)
-    adimlar: List[Adim] = Field(default_factory=list)
-
-# --------------- LLM çağrısı (Ollama) ---------------
-def call_llm(system_prompt: str, user_prompt: str) -> str:
-    """
-    Ollama API üzerinden modele istek atar, JSON cevabı döndürür.
-    JSON dışı içerik gelirse içteki { ... } bloğunu ayıklamayı dener.
-    """
-    payload = {
-        "model": MODEL_NAME,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt}
-        ],
-        "options": {"temperature": 0, "num_ctx": 8192},
-        "format": "json",   # JSON-only mod (modeller destekliyorsa)
-        "stream": False,
-    }
-    # ilk kullanımda modelin derlenmesi uzun sürebilir; timeout yüksek
-    r = requests.post(OLLAMA_URL, json=payload, timeout=(10, 600))
-    r.raise_for_status()
-    content = r.json()["message"]["content"]
-
-    # debug: ilk birkaç cevabı kaydet
-    dbg_dir = Path("data/interim/debug"); dbg_dir.mkdir(parents=True, exist_ok=True)
-    idx = len(list(dbg_dir.glob("raw_*.txt"))) + 1
-    if idx <= 5:
-        (dbg_dir / f"raw_{idx}.txt").write_text(content, encoding="utf-8")
-
-    # doğrudan JSON mu?
+def write_lines_atomic(p: Path, lines: Iterable[str]):
+    """Satır listesini dosyaya atomik olarak yazar (tmp dosya + replace)."""
+    ensure_dir(p.parent)
+    fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=p.name + ".", text=True)
     try:
-        json.loads(content)
-        return content
-    except json.JSONDecodeError:
-        pass
-
-    # içerideki ilk JSON bloğunu yakala
-    start, end = content.find("{"), content.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        sliced = content[start:end+1]
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            for x in lines:
+                s = str(x).strip()
+                if s:
+                    f.write(s + "\n")
+        Path(tmp).replace(p)
+    finally:
         try:
-            json.loads(sliced)
-            return sliced
-        except json.JSONDecodeError:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
             pass
 
-    # başaramazsa boş dict
-    return "{}"
+def append_jsonl_atomic(p: Path, json_lines: Iterable[str]):
+    """JSONL satırlarını dosyanın sonuna ekler; flush+fsync ile yarım yazım riskini azaltır."""
+    ensure_dir(p.parent)
+    with p.open("a", encoding="utf-8") as f:
+        for ln in json_lines:
+            f.write(ln if ln.endswith("\n") else ln + "\n")
+        f.flush()
+        os.fsync(f.fileno())
 
-def build_user_prompt(text: str) -> str:
-    """
-    Kullanıcı promptunu kurar; çok uzun metinleri 3500 karaktere kısaltır.
-    """
-    text = (text or "").strip()
-    if len(text) > 3500:
-        text = text[:3500]
-    return (
-        "Aşağıdaki metinden sistem mesajındaki şema ve kurallara uygun olarak alanları çıkar. "
-        "YALNIZ GEÇERLİ JSON döndür.\n\nMETİN:\n" + text
+def append_lines(p: Path, lines: Iterable[str]):
+    """Verilen satırları (atomik gerektirmeyen) dosyanın sonuna ekler."""
+    ensure_dir(p.parent)
+    with p.open("a", encoding="utf-8") as f:
+        for x in lines:
+            s = str(x).strip()
+            if s:
+                f.write(s + "\n")
+
+def load_system_prompt(prompt_path: Path) -> str:
+    """System prompt dosyasını (UTF-8) okur ve döndürür."""
+    return prompt_path.read_text(encoding="utf-8")
+
+def load_api_key() -> str:
+    """OPENAI_API_KEY ortam değişkeni ya da data/interim/key/openai.key dosyasından anahtarı yükler."""
+    key = os.getenv("OPENAI_API_KEY")
+    if key:
+        return key.strip()
+    key_path = Path("data/interim/key/openai.key")
+    if key_path.exists():
+        return key_path.read_text(encoding="utf-8").strip()
+    raise RuntimeError("OpenAI API key bulunamadı.")
+
+def build_task(custom_id: str, system_prompt: str, user_text: str, model: str) -> Dict:
+    """Tek bir kayıt için Chat Completions batch satırı (JSON) üretir."""
+    return {
+        "custom_id": custom_id,
+        "method": "POST",
+        "url": "/v1/chat/completions",
+        "body": {
+            "model": model,
+            "temperature": 0.0,
+            "seed": 42,
+            "max_tokens": 3000,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_text or ""},
+            ],
+        },
+    }
+
+def parse_batch_result_line(line: str) -> Tuple[str, Dict, str]:
+    """Batch çıktı satırını parse eder; (custom_id, json_data, error_str) döndürür."""
+    o = json.loads(line)
+    cid = o.get("custom_id", "")
+    resp = o.get("response")
+    if resp and "body" in resp:
+        body = resp["body"]
+        try:
+            content = body["choices"][0]["message"]["content"]
+            data = json.loads(content) if isinstance(content, str) else content
+            return cid, data, ""
+        except Exception as e:
+            return cid, {}, f"parse_error: {e}"
+    err = o.get("error")
+    if err:
+        return cid, {}, json.dumps(err, ensure_ascii=False)
+    return cid, {}, "unknown_result_shape"
+
+def _iter_records_any(path: Path, limit: int | None = None, encoding: str = "utf-8-sig") -> Generator[Dict, None, None]:
+    """JSONL veya JSON dosyasından kayıtları sözlük olarak sıralı üretir (generator)."""
+    with path.open("r", encoding=encoding) as f:
+        head = ""
+        while True:
+            ch = f.read(1)
+            if not ch:
+                break
+            if ch == "\ufeff" or ch.isspace():
+                continue
+            head = ch
+            break
+
+    # JSON (liste) dosyası
+    if head == "[":
+        data = json.loads(path.read_text(encoding=encoding))
+        count = 0
+        for item in data:
+            yield item if isinstance(item, dict) else {"_raw": item}
+            count += 1
+            if limit and count >= limit:
+                return
+        return
+
+    # JSONL dosyası
+    with path.open("r", encoding=encoding) as f:
+        count = 0
+        for i, raw in enumerate(f, 1):
+            s = raw.lstrip("\ufeff").strip()
+            if not s:
+                continue
+            try:
+                rec = json.loads(s)
+            except json.JSONDecodeError as e:
+                print(f"[warn] atlandı (satır {i}): {e}", file=sys.stderr)
+                continue
+            if isinstance(rec, dict):
+                yield rec
+                count += 1
+            elif isinstance(rec, list):
+                for item in rec:
+                    yield item if isinstance(item, dict) else {"_raw": item}
+                    count += 1
+                    if limit and count >= limit:
+                        return
+            else:
+                yield {"_raw": rec}
+                count += 1
+            if limit and count >= limit:
+                return
+
+def _write_tasks_chunked(
+    pairs: List[Tuple[str, str]],
+    out_dir: Path,
+    system_prompt: str,
+    model: str,
+    split: int = 1,
+    max_bytes: int = 180 * 1024 * 1024
+) -> List[Tuple[Path, List[str]]]:
+    """Kayıtları split adet parçaya (ve max_bytes sınırına uyarak) .jsonl dosyalarına yazar ve parça listesini döndürür."""
+    ensure_dir(out_dir)
+    if split < 1:
+        split = 1
+
+    n = len(pairs)
+    target_per_part = ceil(n / split)
+
+    parts: List[Tuple[Path, List[str]]] = []
+    part_idx = 1
+    cur_ids: List[str] = []
+    cur_size = 0
+    wf = None
+
+    def _open_new_writer(idx: int):
+        """Yeni parça dosyası açar."""
+        return open(out_dir / f"batch_input.part{idx:02d}.jsonl", "w", encoding="utf-8")
+
+    try:
+        wf = _open_new_writer(part_idx)
+        for _id, text in pairs:
+            line = json.dumps(build_task(_id, system_prompt, text, model), ensure_ascii=False) + "\n"
+            b = line.encode("utf-8")
+            need_new = False
+
+            if len(cur_ids) >= target_per_part:
+                need_new = True
+            if cur_size + len(b) > max_bytes:
+                need_new = True
+
+            if need_new and cur_ids:
+                wf.close()
+                parts.append((out_dir / f"batch_input.part{part_idx:02d}.jsonl", cur_ids))
+                part_idx += 1
+                wf = _open_new_writer(part_idx)
+                cur_ids = []
+                cur_size = 0
+
+            wf.write(line)
+            cur_ids.append(_id)
+            cur_size += len(b)
+
+        if cur_ids:
+            wf.close()
+            parts.append((out_dir / f"batch_input.part{part_idx:02d}.jsonl", cur_ids))
+    finally:
+        if wf and not wf.closed:
+            wf.close()
+
+    return parts
+
+
+# ============================ Komutlar ============================
+
+def cmd_submit_serial(args):
+    """Parçaları sırayla gönderir; her batch tamamlanınca çıktı dosyasına yazar ve sonra sıradakine geçer (tek aktif batch)."""
+    client = OpenAI(api_key=load_api_key())
+
+    input_path        = args.inp
+    out_dir           = Path("data/interim")
+    debug_dir         = out_dir / "debug"
+    submitted_path    = debug_dir / "submitted_ids.txt"
+    done_path         = debug_dir / "done_ids.txt"
+    batch_id_path     = debug_dir / "batch_id.txt"
+
+    ensure_dir(debug_dir)
+
+    # Daha önce işlenen/gönderilenleri atla
+    done_ids: Set[str] = set(read_lines(done_path))
+    already_submitted: Set[str] = set(read_lines(submitted_path))
+    system_prompt = load_system_prompt(args.prompt)
+
+    # Girdiyi sıraya hazırla
+    pairs: List[Tuple[str, str]] = []
+    for i, obj in enumerate(_iter_records_any(input_path, limit=args.limit or None, encoding="utf-8-sig"), 1):
+        _id = str(obj.get(args.id_field, i))
+        if _id in done_ids or _id in already_submitted:
+            continue
+        text = (
+            obj.get(args.text_field)
+            or obj.get("karar_metni")
+            or obj.get("Karar Metni")
+            or obj.get("content")
+            or ""
+        )
+        pairs.append((_id, text))
+
+    if not pairs:
+        print("[submit-serial] Gönderilecek kayıt yok.")
+        return
+
+    # 1000'lik (veya verilen) parçalara böl: split = ceil(n/chunk_size)
+    n = len(pairs)
+    chunk_size = max(1, int(args.chunk_size))
+    split = max(1, ceil(n / chunk_size))
+
+    parts = _write_tasks_chunked(
+        pairs=pairs,
+        out_dir=debug_dir,
+        system_prompt=system_prompt,
+        model=args.model,
+        split=split,
+        max_bytes=int(args.max_bytes)
+    )
+    print(f"[submit-serial] {n} kayıt, {len(parts)} parça (≈{chunk_size}/parça)")
+
+    results_path = out_dir / "02_extract_llm.jsonl"
+
+    # Parçaları sırayla gönder → tamamlanınca sonuçları yaz → sonraki parçaya geç
+    for idx, (path, ids) in enumerate(parts, 1):
+        print(f"[submit-serial] ({idx}/{len(parts)}) gönderiliyor: {path.name} (kayıt={len(ids)})")
+        up = client.files.create(file=open(path, "rb"), purpose="batch")
+        job = client.batches.create(input_file_id=up.id, endpoint="/v1/chat/completions", completion_window="24h")
+
+        append_lines(batch_id_path, [job.id])
+        append_lines(submitted_path, ids)
+
+        remaining_path = debug_dir / f"remaining_ids_{job.id}.txt"
+        write_lines_atomic(remaining_path, ids)
+
+        last_status = None
+        while True:
+            job = client.batches.retrieve(job.id)
+            status = getattr(job, "status", "unknown")
+            if status != last_status:
+                print(f"[submit-serial] batch {job.id} status={status}")
+                last_status = status
+            if status in ("completed", "failed", "expired", "canceled"):
+                break
+            time.sleep(args.check_interval)
+
+        # Sonuçları indir ve güvenli yaz
+        new_completed: Set[str] = set()
+        new_failed: Set[str] = set()
+
+        jsonl_buffer = []
+        if getattr(job, "output_file_id", None):
+            text = client.files.content(job.output_file_id).text
+            for ln in text.strip().splitlines():
+                _id, data, err = parse_batch_result_line(ln)
+                if _id and not err:
+                    jsonl_buffer.append(json.dumps({"Id": _id, "output": data}, ensure_ascii=False))
+                    new_completed.add(_id)
+                elif _id:
+                    new_failed.add(_id)
+
+        if jsonl_buffer:
+            append_jsonl_atomic(results_path, jsonl_buffer)
+
+        if getattr(job, "error_file_id", None):
+            etext = client.files.content(job.error_file_id).text
+            for ln in etext.strip().splitlines():
+                try:
+                    o = json.loads(ln)
+                    cid = o.get("custom_id")
+                    if cid:
+                        new_failed.add(cid)
+                except Exception:
+                    pass
+
+        if new_completed:
+            di = set(read_lines(done_path))
+            di |= new_completed
+            write_lines_atomic(done_path, sorted(di))
+
+        submitted_ids_for_this_batch = set(read_lines(remaining_path))
+        remaining_now = sorted(list(submitted_ids_for_this_batch - new_completed))
+        write_lines_atomic(remaining_path, remaining_now)
+
+        print(json.dumps({
+            "batch_id": job.id,
+            "status": getattr(job, "status", "unknown"),
+            "completed_added": len(new_completed),
+            "failed_added": len(new_failed),
+            "remaining_now": len(remaining_now)
+        }, ensure_ascii=False, indent=2))
+
+    print("[submit-serial] tüm parçalar sırayla gönderildi ve toplandı.")
+
+def _gather_remaining_ids(debug_dir: Path, batch_id: str | None, limit_n: int) -> List[str]:
+    """Tek bir batch için ya da tüm remaining dosyalarından ID listesi döndürür (limit_n uygulanır)."""
+    if batch_id:
+        batch_remaining_path = debug_dir / f"remaining_ids_{batch_id}.txt"
+        rem = read_lines(batch_remaining_path)
+        return rem[:limit_n] if (limit_n and limit_n > 0) else rem
+    # all remaining
+    pool: Set[str] = set()
+    for p in debug_dir.glob("remaining_ids_*.txt"):
+        pool |= set(read_lines(p))
+    rem = sorted(pool)
+    return rem[:limit_n] if (limit_n and limit_n > 0) else rem
+
+def cmd_resume(args):
+    """Kalan/fail kayıt havuzunu chunk-size ile yeniden parçalayıp SERİ olarak batch-batch gönderir ve sonuçları yazdırır."""
+    client = OpenAI(api_key=load_api_key())
+
+    input_path     = args.inp
+    out_dir        = Path("data/interim")
+    debug_dir      = out_dir / "debug"
+    batch_input    = debug_dir / "batch_input_resume.jsonl"
+    submitted_path = debug_dir / "submitted_ids.txt"
+    batch_id_path  = debug_dir / "batch_id.txt"
+
+    ensure_dir(debug_dir)
+
+    # 1) Kalan ID havuzunu topla
+    remaining_ids: List[str] = _gather_remaining_ids(
+        debug_dir=debug_dir,
+        batch_id=args.batch_id if not args.all_remaining else None,
+        limit_n=args.limit_n
     )
 
-# --------------- Girdi yükleme ---------------
-def load_inputs():
-    """
-    CSV (kararlar_segment.csv) okur; her satır için:
-      - text: Karar Metni
-      - case_meta: seçilmiş meta (Sira/Daire/Esas No/Karar No/Tarih)
-      - source_csv: TÜM CSV sütunları (ham kopya)
-    """
-    seg_csv = Path("data/interim/kararlar_segment.csv")
-    if not seg_csv.exists():
-        sys.exit("Girdi bulunamadı: data/interim/kararlar_segment.csv bekleniyor.")
+    if not remaining_ids:
+        print("[resume] Gönderilecek remaining kayıt yok.")
+        return
 
-    with seg_csv.open(encoding="utf-8-sig", newline="") as f:
-        r = csv.DictReader(f)
-        for row in r:
-            # bazen dosyaya başlık satırı tekrar düşebiliyor
-            if row.get("Sira", "").strip() == "Sira":
-                continue
+    print(f"[resume] havuz büyüklüğü: {len(remaining_ids)} id")
 
-            text = (row.get("Karar Metni") or "").strip()
+    # 2) Girdiden bu ID'lere ait metinleri seç
+    system_prompt = load_system_prompt(args.prompt)
+    want: Set[str] = set(remaining_ids)
+    sel: Dict[str, str] = {}
 
-            meta = {
-                "id": row.get("Sira") or None,
-                "daire": row.get("Daire") or None,
-                "esas_no": row.get("Esas No") or None,
-                "karar_no": row.get("Karar No") or None,
-                "tarih": row.get("Tarih") or None,
-            }
-            raw_csv = dict(row)  # <<<<<< TÜM sütunları ham olarak taşı
-            yield {"case_meta": meta, "text": text, "source_csv": raw_csv}
+    for obj in _iter_records_any(input_path, encoding="utf-8-sig"):
+        if not want:
+            break
+        _id = str(obj.get(args.id_field))
+        if _id in want:
+            text = (
+                obj.get(args.text_field)
+                or obj.get("karar_metni")
+                or obj.get("Karar Metni")
+                or obj.get("content")
+                or ""
+            )
+            sel[_id] = text
+            want.remove(_id)
 
-# --------------- Ana koşu ---------------
-def run(limit: Optional[int] = None):
-    """
-    Satırları LLM'e gönderir, Pydantic ile doğrular ve JSONL olarak yazar.
-    Başarısız/boş metinlerde işaret bayrağıyla birlikte boş şema yazar.
-    """
-    out_path = Path("data/interim/02_extract_llm.jsonl")
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    if not sel:
+        sys.exit("[resume] remaining kayıtlar girdide bulunamadı.")
 
-    n = 0
-    with out_path.open("w", encoding="utf-8") as out:
-        for item in load_inputs():
-            if limit and n >= limit:
+    # 3) Yeniden PARÇALA: chunk-size'a göre yeni küçük batch dosyaları oluştur
+    ids_text_pairs = list(sel.items())  # [(id, text), ...]
+    n = len(ids_text_pairs)
+    chunk_size = max(1, int(args.chunk_size))
+    split = max(1, ceil(n / chunk_size))
+
+    parts = _write_tasks_chunked(
+        pairs=ids_text_pairs,
+        out_dir=debug_dir,
+        system_prompt=system_prompt,
+        model=args.model,
+        split=split,
+        max_bytes=int(args.max_bytes)
+    )
+    print(f"[resume] {n} remaining kayıt, {len(parts)} yeni parça (≈{chunk_size}/parça)")
+
+    results_path = out_dir / "02_extract_llm.jsonl"
+
+    # 4) Parçaları SIRAYLA gönder → tamamlanınca yaz → sıradaki
+    for idx, (path, ids) in enumerate(parts, 1):
+        print(f"[resume] ({idx}/{len(parts)}) gönderiliyor: {path.name} (kayıt={len(ids)})")
+        up = client.files.create(file=open(path, "rb"), purpose="batch")
+        job = client.batches.create(input_file_id=up.id, endpoint="/v1/chat/completions", completion_window="24h")
+
+        append_lines(batch_id_path, [job.id])
+        append_lines(submitted_path, ids)
+
+        # Bu YENİ resume batch'i için ayrı remaining başlangıcı
+        new_remaining_path = debug_dir / f"remaining_ids_{job.id}.txt"
+        write_lines_atomic(new_remaining_path, ids)
+
+        last_status = None
+        while True:
+            job = client.batches.retrieve(job.id)
+            status = getattr(job, "status", "unknown")
+            if status != last_status:
+                print(f"[resume] batch {job.id} status={status}")
+                last_status = status
+            if status in ("completed", "failed", "expired", "canceled"):
                 break
+            time.sleep(args.check_interval)
 
-            # çok kısa/boş metin -> işaretle
-            if not item["text"] or len(item["text"].strip()) < 50:
-                payload = {
-                    "meta": item["case_meta"],
-                    "record": RecordOut().model_dump(),
-                    "source_csv": item.get("source_csv", {}),
-                    "quality_flags": ["empty_text"]
-                }
-                out.write(json.dumps(payload, ensure_ascii=False) + "\n")
-                n += 1
-                continue
+        # Sonuçları indir ve güvenli yaz
+        new_completed: Set[str] = set()
+        new_failed: Set[str] = set()
 
-            user = build_user_prompt(item["text"])
+        jsonl_buffer = []
+        if getattr(job, "output_file_id", None):
+            text = client.files.content(job.output_file_id).text
+            for ln in text.strip().splitlines():
+                _id, data, err = parse_batch_result_line(ln)
+                if _id and not err:
+                    jsonl_buffer.append(json.dumps({"Id": _id, "output": data}, ensure_ascii=False))
+                    new_completed.add(_id)
+                elif _id:
+                    new_failed.add(_id)
 
-            success = False
-            for _ in range(3):
-                raw = call_llm(system_prompt, user)
+        if jsonl_buffer:
+            append_jsonl_atomic(results_path, jsonl_buffer)
+
+        if getattr(job, "error_file_id", None):
+            etext = client.files.content(job.error_file_id).text
+            for ln in etext.strip().splitlines():
                 try:
-                    data = json.loads(raw)
-                    parsed = RecordOut.model_validate(data).model_dump()
-                    payload = {
-                        "meta": item["case_meta"],
-                        "record": parsed,
-                        "source_csv": item.get("source_csv", {})
-                    }
-                    out.write(json.dumps(payload, ensure_ascii=False) + "\n")
-                    success = True
-                    break
-                except (json.JSONDecodeError, ValidationError):
-                    time.sleep(0.8)
+                    o = json.loads(ln)
+                    cid = o.get("custom_id")
+                    if cid:
+                        new_failed.add(cid)
+                except Exception:
+                    pass
 
-            if not success:
-                payload = {
-                    "meta": item["case_meta"],
-                    "record": RecordOut().model_dump(),
-                    "source_csv": item.get("source_csv", {}),
-                    "quality_flags": ["llm_parse_failed"]
-                }
-                out.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        # done_ids güncelle
+        done_path = debug_dir / "done_ids.txt"
+        if new_completed:
+            di = set(read_lines(done_path))
+            di |= new_completed
+            write_lines_atomic(done_path, sorted(di))
 
-            n += 1
+        # Bu yeni resume batch'inin remaining'i güncelle
+        submitted_ids_for_this_batch = set(read_lines(new_remaining_path))
+        remaining_now = sorted(list(submitted_ids_for_this_batch - new_completed))
+        write_lines_atomic(new_remaining_path, remaining_now)
 
-    print(f"✅ Extract tamam: {n} kayıt -> {out_path}")
+        print(json.dumps({
+            "batch_id": job.id,
+            "status": getattr(job, "status", "unknown"),
+            "completed_added": len(new_completed),
+            "failed_added": len(new_failed),
+            "remaining_now": len(remaining_now)
+        }, ensure_ascii=False, indent=2))
+
+    print("[resume] tüm remaining parçaları sırayla yeniden gönderildi ve toplandı.")
+
+
+# ============================ CLI ============================
+
+def main():
+    """Komut satırı arayüzünü başlatır ve ilgili komutu çalıştırır (submit-serial, resume)."""
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--in", dest="inp", type=Path, default=Path("data/interim/kararlar_segment.jsonl"),
+                        help="Girdi JSONL/JSON (vars: data/interim/kararlar_segment.jsonl)")
+    common.add_argument("--prompt", type=Path, default=Path("src/llm/prompts/extract_system.md"),
+                        help="System prompt (vars: src/llm/prompts/extract_system.md)")
+    common.add_argument("--model", default="gpt-4o-mini", help="Model (vars: gpt-4o-mini)")
+    common.add_argument("--id-field", default="Id", help="Girdi Id alanı (vars: 'Id')")
+    common.add_argument("--text-field", default="Karar Metni", help="LLM'e gidecek metin alanı (vars: 'Karar Metni')")
+
+    # submit-serial: sırayla gönder, tamamlanınca topla
+    p_sserial = sub.add_parser("submit-serial", parents=[common],
+                               help="Parçaları sırayla gönderir; her parça tamamlanınca sonucu yazar ve sonra sıradakine geçer")
+    p_sserial.add_argument("--limit", type=int, default=0, help="Opsiyonel: ilk N kaydı oku")
+    p_sserial.add_argument("--chunk-size", type=int, default=1000, help="Her batch dosyasına en fazla N kayıt (vars: 1000)")
+    p_sserial.add_argument("--max-bytes", type=int, default=160*1024*1024, help="Her parça için ~maksimum dosya boyutu (byte)")
+    p_sserial.add_argument("--check-interval", type=int, default=60, help="Durum kontrol aralığı (sn)")
+    p_sserial.set_defaults(func=cmd_submit_serial)
+
+    # resume: kalan/fail havuzunu tekrar küçük batch'lere bölerek seri gönder
+    p_resume = sub.add_parser("resume", parents=[common],
+                              help="Kalan/fail kayıt havuzunu chunk-size ile yeniden parçalayıp seri olarak gönderir")
+    p_resume.add_argument("--batch-id", help="Sadece bu batch'in remaining kayıtlarını al")
+    p_resume.add_argument("--all-remaining", action="store_true", help="Tüm remaining dosyalarını birleştir")
+    p_resume.add_argument("--limit-n", type=int, default=0, help="Havuzdan en fazla N kayıt al (ör: 1000)")
+    p_resume.add_argument("--chunk-size", type=int, default=1000, help="Yeniden gönderimde her batch dosyasına en fazla N kayıt")
+    p_resume.add_argument("--max-bytes", type=int, default=160*1024*1024, help="Her parça için ~maksimum dosya boyutu (byte)")
+    p_resume.add_argument("--check-interval", type=int, default=60, help="Durum kontrol aralığı (sn)")
+    p_resume.set_defaults(func=cmd_resume)
+
+    args = ap.parse_args()
+    args.func(args)
 
 if __name__ == "__main__":
-    # Ör: python src/etl/02_extract_llm.py 5
-    limit = int(sys.argv[1]) if len(sys.argv) > 1 else None
-    run(limit)
+    main()
+
+#submit-serial
+#python src/etl/02_extract_llm.py submit-serial --in data/interim/kararlar_segment.jsonl --chunk-size 1000 --max-bytes 160000000 --check-interval 60
+
+
+#resume
+# tek bir batch’in kalanları
+#python src/etl/02_extract_llm.py resume --batch-id <FAILED_BATCH_ID> --chunk-size 1000 --max-bytes 160000000 --check-interval 60
+
+# ya da tüm remaining havuzundan
+#python src/etl/02_extract_llm.py resume --all-remaining --chunk-size 1000 --max-bytes 160000000 --check-interval 60

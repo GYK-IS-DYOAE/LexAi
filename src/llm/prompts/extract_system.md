@@ -1,53 +1,80 @@
-Yalnızca **GEÇERLİ JSON** üret. Metin dışında hiçbir şey yazma.  
-Uydurma yapma; emin değilsen ilgili alanı `null` veya `[]` bırak.  
-Her iddia için metinden kısa bir **"span"** (1–2 cümle) ver; **span bulamazsan o adımı yazma**.
+**System Message:**
 
-## ŞEMA
+**ROLE**: Sen bir hukuk uzmanısın. Görevin Yargıtay karar metinlerini analiz etmek ve bilgilerini etkili bir şekilde sınıflandırmaktır.
+
+**OBJECTIVE**: 
+
+- Birincil görevin, sağlanan içeriği etkili bir şekilde yapılandırıp, doğru etkiletlendirerek JSON formatına dönüştürmek.
+- Bu etiketler, sağlanan içeriğin ana konularını özetlerken, özgünlük ve açıklayıcılığı vurgulayan katı etiketleme kullarına uymalıdır.
+- Yalnızca doğal Türkçe kelimelerden oluşmalıdır.
+
+**User Message:**
+
+Verilen karar metnine göre, aşağıda sağlanan JSON formatına uygun olarak metni yapılandır.
+Çıktı mutlaka geçerli JSON olmalı. 
+
+## RESPONSE FORMAT
+
 {
   "dava_turu": "string|null",
-  "alt_dava_turleri": ["string"],
   "taraf_iliskisi": "string|null",
-
   "sonuc": "onama|bozma|kısmen_bozma|duzelterek_onama|ret|kabul|kısmen_kabul|diger|null",
+  "karar": "string|null",
+  "gerekce": ["string"],
+
+  "metin_esas_no": ["string|null"],
+  "metin_karar_no": ["string|null"],
 
   "kanun_atiflari": [
-    {"kanun":"string|null","madde":"string|null","fikra":"string|null","span":"string|null"}
+    {
+      "kanun": "string|null",
+      "madde": "string|null",
+      "fikra": "string|null",
+      "span": "string|null"
+    }
   ],
 
   "deliller": ["string"],
   "talepler": ["string"],
   "gecici_tedbirler": ["string"],
-  "basvuru_yolu": "istinaf|temyiz|yok|null",
+
+  "basvuru_yolu": ["istinaf|temyiz|karar_düzeltme|yok"],
 
   "onemli_tarihler": [
-    {"tip":"string","tarih":"YYYY-MM-DD|null","span":"string"}
-  ],
-  "miktarlar": [
-    {"tutar":"string","para_birimi":"string|null","span":"string"}
+    {
+      "tip": "ilk_derece_karari|bozma|onama|duzeltme_basvuru|karar_duzeltme_reddi|nihai_karar|diger",
+      "tarih": "YYYY-MM-DD|null",
+      "span": "string"
+    }
   ],
 
   "adimlar": [
     {
-      "ad": "ILK_DERECE|ISTINAF_BASVURU|ISTINAF_INCELEME|ISTINAF_KARAR|TEMYIZ_BASVURU|TEMYIZ_INCELEME|BOZMA|ONAMA|DUZELTEREK_ONAMA|KARAR_DUZELTME_BASVURU|KARAR_DUZELTME_REDDI|KARAR_DUZELTME_KABUL|NIHAI_KARAR|DIGER",
+      "ad": "ILK_DERECE|TEMYIZ_BASVURU|ISTINAF_BASVURU|ISTINAF_INCELEME|TEMYIZ_INCELEME|BOZMA|ONAMA|DUZELTEREK_ONAMA|KARAR_DUZELTME_BASVURU|KARAR_DUZELTME_REDDI|NIHAI_KARAR|DIGER",
       "ozet": "string|null",
       "tarih": "YYYY-MM-DD|null",
-      "mercii": "İlk Derece Mahkemesi|BAM|Yargıtay|davacı|davalı|null",
+      "karar_mercii": "İlk Derece Mahkemesi|Bölge Adliye Mahkemesi|Yargıtay|null",
       "spans": ["string"]
     }
-  ]
+  ],
+
+  "hikaye": ["string"]
 }
 
-## KURALLAR
-- **Kronoloji zorunlu.** Metindeki her önemli **işlem** ayrı bir adım olsun (başvuru, inceleme, karar).
-- **Sebep–sonuç dili kullan:** Her `ozet` **tek cümle** olsun ve **“X olduğu için/üzerine Y oldu; ardından Z oldu”** kalıbını izlesin.  
-  Ör.: “Davacı temyize başvurduğu **için** Yargıtay dosyayı inceledi.”  
-  Ör.: “Karar düzeltme yolu **tamamlanmadığı için** Özel Daire kararları **bozdu**.”
-- **Aynı satırda birden çok işlem varsa böl:** “başvuru + inceleme + karar” aynı cümledeyse 2–3 ayrı adım yaz.
-- **Doğru aileyi seç:**  
-  - Metinde “**Yargıtay / HGK**” varsa **TEMYİZ** ailesi (`TEMYIZ_BASVURU`, `TEMYIZ_INCELEME`, `BOZMA`/`ONAMA`/`DUZELTEREK_ONAMA`).  
-  - “**BAM / Bölge Adliye**” varsa **İSTİNAF** ailesi (`ISTINAF_BASVURU`, `ISTINAF_INCELEME`, `ISTINAF_KARAR`).
-- **Karar adımı** (BOZMA/ONAMA/DUZELTEREK_ONAMA/KARAR_DUZELTME_REDDI/KABUL/NIHAI_KARAR) **varsa**, aynı olaya ait **başvuru adımı** da bulunmalı ve kronolojide önce gelmeli.
-- **Tarih** metinde açıksa `YYYY-MM-DD`, emin değilsen `null`.
-- **Span zorunlu:** Her adım için metinden **en az bir** kısa alıntı `spans` içine koy (kanıt cümlesi). **Span bulamıyorsan o adımı yazma.**
-- **Uydurma yapma.** Emin olmadığın alanları `null`/`[]` bırak.
-- **Yalnızca JSON** döndür; açıklama/etiket/yorum yazma.
+## RULES
+- Çıktı yalnızca tek JSON, başka metin yok.
+- Uydurma yapılmaz, olmayan veri null veya [].
+- Zorunlu alanlar: dava_turu, taraf_iliskisi, sonuc, karar, gerekce, basvuru_yolu, adimlar, hikaye.
+- Mercii uyumu: ILK_DERECE → İlk Derece Mahkemesi; ISTINAF_* → Bölge Adliye Mahkemesi; TEMYIZ_* ve diğer üst aşamalar → Yargıtay; DIGER → içeriğe göre seç.
+- `BOZMA`: Yalnızca hükmün açıkça bozulduğu durumlarda kullanılır. Ek karar kaldırma, usuli düzeltme vb. özel durumlar için `DIGER` seçilmelidir.
+- dava_turu alanı hiçbir zaman null olamaz. Her durumda, metni en iyi özetleyen, doğal Türkçe bir konu başlığı üret. Açık tür belirtilmemişse dahi en yakın genel başlığı seç (örn. “dava”, “alacak”, “tazminat”, “icra/şikâyet”).
+- `metin_esas_no` / `metin_karar_no`: Metinde “Esas No”, “Karar No”, “E.” veya “K.” şeklinde geçen tüm numaralar listeye eklenmeli. Hiç yoksa `[null]` yaz. Aynı numara birden fazla geçse bile listede **yalnızca bir kez** yer almalıdır.  
+- `ad`: Yalnızca şemadaki değerler kullanılabilir; uydurma ad (ör. KARAR_DUZELTME_INCELEME) yazılamaz. Gerekirse `DIGER` kullanılmalı. Büyük harflerle yazılmalı.
+- `basvuru_yolu`: Temyiz varsa daima `"temyiz"`. İstinaf varsa `"istinaf"`. Karar düzeltme tek başına varsa `"karar_düzeltme"`. Hiçbiri yoksa `"yok"`. Süreçte geçen her yol listelenmeli.
+Örn: önce istinaf, sonra temyiz → ["istinaf","temyiz"].
+- `kanun_atiflari`: Her kanun/madde/fıkra ayrı obje, span tam cümle. Eğer kanun adı var ama madde belirtilmemişse, `madde` ve `fikra` alanı null bırakılmalı, kanun adı yine listede yer almalı.
+- `adimlar`: Her KARAR_DUZELTME_REDDI’den önce mutlaka bir KARAR_DUZELTME_BASVURU olmalı. Aynı aşama farklı tarih/span ile tekrar edebilir.
+- `onemli_tarihler` ↔ `adimlar`: aynı olaylar aynı tarih ile eşleşmeli.
+- `gerekce`: liste, her eleman tek cümlelik neden.
+- `hikaye`: madde madde, kronolojik, gerekçelerdeki hukuki noktaları da sürece bağla.
+- Tutarlılık: sonuc ↔ karar metni uyumlu.

@@ -1,6 +1,7 @@
 import re
 import html
 import yaml
+import json
 import argparse
 import unicodedata
 from pathlib import Path
@@ -264,11 +265,46 @@ def blank_mask_for_series(s: pd.Series) -> pd.Series:
     """Boş kabul edilen değerler için maske üretir."""
     return s.isna() | s.map(lambda x: isinstance(x, str) and x.strip().lower() in {"", "nan", "null", "none", "na"})
 
-def run_clean(input_csv: str, output_csv: str, cfg_path: str,
+def _infer_format_from_path(output_path: str) -> str:
+    suf = Path(output_path).suffix.lower()
+    if suf == ".jsonl":
+        return "jsonl"
+    if suf == ".json":
+        return "json"
+    if suf == ".csv":
+        return "csv"
+    # Varsayılan: jsonl
+    return "jsonl"
+
+def _write_output(df: pd.DataFrame, output_path: str, encoding: str, fmt: str) -> None:
+    p = Path(output_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+
+    if fmt == "jsonl":
+        s = df.to_json(orient="records", lines=True, force_ascii=False)
+        p.write_text(s, encoding=encoding)
+        return
+
+    if fmt == "json":
+        s = df.to_json(orient="records", force_ascii=False, indent=2)
+        p.write_text(s, encoding=encoding)
+        return
+
+    if fmt == "csv":
+        if "KararIlgiliTarihler" in df.columns:
+            df = df.copy()
+            df["KararIlgiliTarihler"] = df["KararIlgiliTarihler"].apply(lambda x: json.dumps(x, ensure_ascii=False) if isinstance(x, list) else x)
+        df.to_csv(p, index=False, encoding="utf-8-sig")
+        return
+
+    raise ValueError(f"Bilinmeyen çıktı formatı: {fmt}")
+
+def run_clean(input_csv: str, output_path: str, cfg_path: str,
               encoding: str = "utf-8-sig",
               limit: int | None = None,
-              null_report_csv: str | None = None) -> None:
-    """CSV’yi okur, metni temizler, tarih kolonunu ekler ve JSONL olarak yazar."""
+              null_report_csv: str | None = None,
+              out_format: str | None = None) -> None:
+    """CSV’yi okur, metni temizler, tarih kolonunu ekler ve seçilen formata yazar."""
     cfg = load_config(cfg_path)
     patterns = compile_patterns(cfg)
     df = pd.read_csv(input_csv, encoding=encoding)
@@ -276,6 +312,7 @@ def run_clean(input_csv: str, output_csv: str, cfg_path: str,
         df = df.head(limit)
     col = "Karar Metni"
     df = df.dropna(subset=[col]).copy()
+
     cleaned = []
     all_captures = []
     for txt in df[col]:
@@ -284,37 +321,41 @@ def run_clean(input_csv: str, output_csv: str, cfg_path: str,
         all_captures.append(caps)
     df[col] = cleaned
     df["KararIlgiliTarihler"] = build_normalized_dates_per_row(all_captures)
+
     present_required = [c for c in REQUIRED_COLS if c in df.columns]
     if present_required:
         bad_any = pd.Series(False, index=df.index)
         for c in present_required:
             bad_any = bad_any | blank_mask_for_series(df[c])
         df = df[~bad_any].copy()
-    p = Path(output_csv)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    s = df.to_json(orient="records", lines=True, force_ascii=False)
-    p.write_text(s, encoding=encoding)
+
+    fmt = (out_format or _infer_format_from_path(output_path)).lower()
+    _write_output(df, output_path, encoding, fmt)
+
     null_report(df, null_report_csv)
 
 def build_cli() -> argparse.ArgumentParser:
     """Komut satırı argümanlarını tanımlar."""
     parser = argparse.ArgumentParser(prog="LexAi-00-clean")
-    parser.add_argument("--in", dest="inp", required=True)
-    parser.add_argument("--out", dest="out", required=True)
-    parser.add_argument("--cfg", dest="cfg", required=True)
+    parser.add_argument("--in", dest="inp", required=True, help="Girdi CSV yolu")
+    parser.add_argument("--out", dest="out", required=True, help="Çıktı dosya yolu (.jsonl/.json/.csv)")
+    parser.add_argument("--cfg", dest="cfg", required=True, help="Regex/YAML konfig yolu")
     parser.add_argument("--encoding", default="utf-8-sig")
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--null-report", dest="null_report", default=None)
+    parser.add_argument("--null-report", dest="null_report", default=None, help="Null özet CSV yolu")
+    parser.add_argument("--format", dest="out_format", choices=["jsonl", "json", "csv"], default=None,
+                        help="Çıktı formatı (belirtilmezse uzantıdan çıkarılır)")
     return parser
 
 def main() -> None:
     """Argümanları alır ve temizleme sürecini başlatır."""
     parser = build_cli()
     args = parser.parse_args()
-    run_clean(args.inp, args.out, args.cfg, args.encoding, args.limit, args.null_report)
+    run_clean(args.inp, args.out, args.cfg, args.encoding, args.limit, args.null_report, args.out_format)
 
 if __name__ == "__main__":
     main()
+
 
 
 #jsonl
@@ -323,5 +364,5 @@ if __name__ == "__main__":
 #python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.json --cfg configs/regex_patterns.yml
 
 
-# python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.csv --limit 5000 --cfg configs/regex_patterns.yml --null-report data/interim/boşluk_özeti.csv
+#python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.csv --limit 5000 --cfg configs/regex_patterns.yml --null-report data/interim/boşluk_özeti.csv
 #python src/etl/00_clean.py --in data/raw/kararlar.csv --out data/interim/kararlar_clean.csv --limit 5000 --cfg configs/regex_patterns.yml
