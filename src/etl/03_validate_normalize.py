@@ -2,185 +2,164 @@
 03_validate_normalize.py
 ------------------------
 Amaç:
-- 02_extract_llm.jsonl içindeki LLM ham çıktısını doğrulamak ve normalize etmek.
-- Aşağıdakileri yapar:
-  * 'sonuc' alanını sözlük üzerinden kanonikleştirir,
-  * kanun atıflarında kanun kodu (TMK/HMK/HUMK/İİK/TBK/TCK) ve maddeyi normalize eder,
-  * meta.tarih ve onemli_tarihler[].tarih alanlarını YYYY-MM-DD biçimine çevirir,
-  * 'adimlar' listesinden spans'i boş olan adımları düşer (kronoloji kanıtlı kalsın),
-  * basit kalite bayrakları ekler (few_steps, law_without_span, steps_dropped).
-- Çıktı: data/interim/03_validated.jsonl (JSON Lines)
+- 02_extract_llm_parsed.json içindeki LLM JSON çıktısını şemaya göre doğrulamak ve normalize etmek.
+- Kurallar:
+  * 'sonuc' alanını sabit listeye göre normalize eder: onama|bozma|ret|kabul|vs.
+  * 'kanun_atiflari' içindeki 'kanun' ve 'madde' ayrıştırılır.
+  * Tarihler YYYY-MM-DD formatına çevrilir.
+  * 'adimlar' içindeki 'spans': [] olan adımlar çıkarılır.
+  * Kalite bayrakları eklenir: law_without_span, few_steps, steps_dropped.
 """
 
 import json
 import re
-import sys
 from pathlib import Path
 from datetime import datetime
-import yaml
 
-# ------------------ Yapılandırma yükleme ------------------
-CFG_PATH = Path("configs/normalizers.yml")
+INPUT_PATH = Path("data/interim/02_extract_llm_parsed.json")
+OUTPUT_PATH = Path("data/interim/03_validated.jsonl")
 
-def load_norm_config() -> dict:
-    """
-    normalizers.yml dosyasını okur ve sözlük olarak döndürür.
-    Dosya yok veya bozuksa anlamlı bir hata mesajı ile süreci durdurur.
-    """
-    if not CFG_PATH.exists():
-        sys.exit("HATA: configs/normalizers.yml bulunamadı.")
-    try:
-        data = yaml.safe_load(CFG_PATH.read_text(encoding="utf-8")) or {}
-        return data
-    except Exception as e:
-        sys.exit(f"HATA: normalizers.yml okunamadı/bozuk: {e}")
+VALID_SONUC_VALUES = [
+    "onama", "bozma", "kısmen_bozma", "duzelterek_onama", "ret", "kabul",
+    "kısmen_kabul", "diger"
+]
 
-NORM = load_norm_config()
-SONUC_MAP = NORM.get("sonuc_map", {})          # ör: {"ret": ["reddi", "red"], ...}
-KANUN_MAP = NORM.get("kanun_kod_map", {})      # ör: {"hmk": ["hmk","6100"], "humk": ["humk","1086"], ...}
+KANUN_REGEX = re.compile(r"\b([A-ZÇĞİÖŞÜ]{2,5})\b")
+TARIH_FORMATLARI = ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y")
 
-# ------------------ Yardımcı normalizasyonlar ------------------
-def norm_sonuc(x):
-    """
-    'sonuc' alanını kanonik değere çevirir.
-    """
-    if not x:
-        return None
-    lx = x.lower()
-    for canon, variants in SONUC_MAP.items():
-        if any(v in lx for v in variants):
-            return canon
-    return "diger"
-
-def norm_kanun(k):
-    """
-    Kanun adını/kodunu TMK/TBK/HMK/HUMK/İİK/TCK gibi kısaltmalara çevirir.
-    """
-    if not k:
-        return None
-    lk = k.lower()
-    for canon, variants in KANUN_MAP.items():
-        if any(v in lk for v in variants):
-            return {
-                "medeni_kanun": "TMK",
-                "borclar_kanunu": "TBK",
-                "hmk": "HMK",
-                "humk": "HUMK",
-                "iik": "İİK",
-                "tck": "TCK",
-            }[canon]
-    if re.fullmatch(r"[a-zçğıöşü]{2,5}", lk):
-        return lk.upper()
-    return None
-
-def norm_date(s):
-    """
-    Tarihi YYYY-MM-DD formatına normalize eder.
-    """
-    if not s:
+def normalize_date(s):
+    if not s or not isinstance(s, str):
         return None
     s = s.strip()
-    for fmt in ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y"):
+    for fmt in TARIH_FORMATLARI:
         try:
             return datetime.strptime(s, fmt).strftime("%Y-%m-%d")
         except Exception:
-            pass
+            continue
     return None
 
-def normalize_onemli_tarihler(lst):
-    """
-    onemli_tarihler[*].tarih alanlarını normalize eder.
-    """
-    if not isinstance(lst, list):
-        return []
-    out = []
-    for it in lst:
-        if not isinstance(it, dict):
-            continue
-        d = dict(it)
-        if "tarih" in d and d["tarih"]:
-            d["tarih"] = norm_date(d["tarih"])
-        out.append(d)
-    return out
+def normalize_sonuc(value):
+    if not value or not isinstance(value, str):
+        return "diger"
+    val = value.strip().lower()
+    for v in VALID_SONUC_VALUES:
+        if v in val:
+            return v
+    if "red" in val or "reddi" in val:
+        return "ret"
+    if "kabul" in val:
+        return "kabul"
+    return "diger"
 
-def drop_steps_without_spans(steps):
-    """
-    'adimlar' listesinden spans'i boş olan adımları düşer.
-    """
-    if not isinstance(steps, list):
-        return ([], 0)
+def normalize_kanun(kanun_str):
+    if not kanun_str or not isinstance(kanun_str, str):
+        return None
+    match = KANUN_REGEX.search(kanun_str.upper())
+    return match.group(1) if match else None
+
+def validate_and_normalize_record(_id, content):
+    record = content.copy()
+    quality_flags = []
+
+    # SONUC normalize
+    record["sonuc"] = normalize_sonuc(record.get("sonuc"))
+
+    # GEREKÇE - zorunlu, liste olmalı
+    if not isinstance(record.get("gerekce"), list):
+        record["gerekce"] = [record.get("gerekce")] if record.get("gerekce") else []
+
+    # METIN NUMARALARI normalize
+    for key in ["metin_esas_no", "metin_karar_no"]:
+        items = record.get(key)
+        if not isinstance(items, list):
+            record[key] = [items] if items else [None]
+        else:
+            record[key] = list(set(items)) or [None]
+
+    # KANUN ATIFLARI normalize
+    for i, k in enumerate(record.get("kanun_atiflari", [])):
+        if isinstance(k, dict):
+            k["kanun"] = normalize_kanun(k.get("kanun"))
+            if k.get("madde"):
+                k["madde"] = re.sub(r"\D+", "", str(k["madde"])) or None
+            k["fikra"] = str(k.get("fikra")) if k.get("fikra") else None
+        else:
+            record["kanun_atiflari"][i] = {
+                "kanun": None, "madde": None, "fikra": None, "span": str(k)
+            }
+    # quality flag
+    if any(k.get("kanun") and not k.get("span") for k in record.get("kanun_atiflari", [])):
+        quality_flags.append("law_without_span")
+
+    # TALEPLER vb. boş liste kontrolü
+    for key in ["deliller", "talepler", "gecici_tedbirler"]:
+        if not isinstance(record.get(key), list):
+            record[key] = []
+
+    # BASVURU YOLU normalize
+    yollar = record.get("basvuru_yolu", [])
+    if isinstance(yollar, str):
+        yollar = [yollar]
+    yollar = [y for y in yollar if y in {"istinaf", "temyiz", "karar_düzeltme", "yok"}]
+    record["basvuru_yolu"] = yollar or ["yok"]
+
+    # ONEMLI TARIHLER
+    for item in record.get("onemli_tarihler", []):
+        if "tarih" in item:
+            item["tarih"] = normalize_date(item["tarih"])
+
+    # ADIMLAR: spans boşsa çıkar
+    steps = record.get("adimlar", [])
     kept, dropped = [], 0
     for a in steps:
-        if isinstance(a, dict) and a.get("spans") and len(a.get("spans", [])) > 0:
+        if isinstance(a, dict) and a.get("spans"):
             kept.append(a)
         else:
             dropped += 1
-    return (kept, dropped)
-
-# ------------------ Kayıt doğrulama ------------------
-def validate_record(j):
-    """
-    Tek bir kaydı normalize eder ve kalite bayraklarını günceller.
-    """
-    rec = j.get("record", {}) or {}
-    meta = j.get("meta", {}) or {}
-
-    # meta.tarih normalize
-    if meta.get("tarih"):
-        meta["tarih"] = norm_date(meta.get("tarih"))
-    j["meta"] = meta
-
-    # sonuc normalize
-    rec["sonuc"] = norm_sonuc(rec.get("sonuc"))
-
-    # kanun atıfları normalize
-    for a in rec.get("kanun_atiflari", []):
-        a["kanun"] = norm_kanun(a.get("kanun"))
-        if a.get("madde"):
-            only_digits = re.sub(r"\D+", "", str(a["madde"]))
-            a["madde"] = only_digits if only_digits else None
-
-    # önemli tarihler normalize
-    rec["onemli_tarihler"] = normalize_onemli_tarihler(rec.get("onemli_tarihler"))
-
-    # adımlar: spans boş olanları düş
-    adims = rec.get("adimlar", [])
-    adims_filtered, dropped = drop_steps_without_spans(adims)
-    rec["adimlar"] = adims_filtered
-
-    # kalite bayrakları
-    flags = list(j.get("quality_flags", []))
-    if len(rec.get("adimlar", [])) < 3:
-        flags.append("few_steps")
-    if any(a.get("kanun") and not a.get("span") for a in rec.get("kanun_atiflari", [])):
-        flags.append("law_without_span")
+    record["adimlar"] = kept
     if dropped > 0:
-        flags.append("steps_dropped_no_span")
+        quality_flags.append("steps_dropped")
 
-    j["record"] = rec
-    j["quality_flags"] = flags
-    return j
+    if len(kept) < 3:
+        quality_flags.append("few_steps")
 
-# ------------------ Giriş/Çıkış akışı ------------------
-def run():
-    """
-    02_extract_llm.jsonl -> 03_validated.jsonl
-    """
-    inp = Path("data/interim/02_extract_llm.jsonl")
-    out = Path("data/interim/03_validated.jsonl")
-    out.parent.mkdir(parents=True, exist_ok=True)
+    # HIKAYE normalize
+    if not isinstance(record.get("hikaye"), list):
+        record["hikaye"] = [record.get("hikaye")] if record.get("hikaye") else []
 
-    if not inp.exists():
-        sys.exit("HATA: data/interim/02_extract_llm.jsonl yok. Önce 02_extract_llm.py çalıştırın.")
+    # Zorunlu alanlar: yoksa flagle
+    for key in ["dava_turu", "taraf_iliskisi", "sonuc", "karar", "gerekce", "basvuru_yolu", "adimlar", "hikaye"]:
+        if not record.get(key):
+            quality_flags.append(f"missing_{key}")
 
-    n = 0
-    with inp.open(encoding="utf-8") as f, out.open("w", encoding="utf-8") as g:
-        for line in f:
-            j = json.loads(line)
-            g.write(json.dumps(validate_record(j), ensure_ascii=False) + "\n")
-            n += 1
-    print(f"✅ Doğrulama/normalize tamam: {n} kayıt -> {out}")
+    return {
+        "id": _id,
+        "record": record,
+        "quality_flags": sorted(list(set(quality_flags)))
+    }
 
-# ------------------ Çalıştırma ------------------
+def main():
+    if not INPUT_PATH.exists():
+        print(f"❌ Girdi dosyası bulunamadı: {INPUT_PATH}")
+        return
+
+    parsed = json.loads(INPUT_PATH.read_text(encoding="utf-8"))
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    with OUTPUT_PATH.open("w", encoding="utf-8") as out_f:
+        for _id, content in parsed.items():
+            try:
+                result = validate_and_normalize_record(_id, content)
+                out_f.write(json.dumps(result, ensure_ascii=False) + "\n")
+            except Exception as e:
+                out_f.write(json.dumps({
+                    "id": _id,
+                    "record": content,
+                    "quality_flags": ["processing_error"],
+                    "error": str(e)
+                }, ensure_ascii=False) + "\n")
+
+    print(f"✅ {OUTPUT_PATH.name} başarıyla oluşturuldu.")
+
 if __name__ == "__main__":
-    run()
+    main()
