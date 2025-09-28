@@ -192,7 +192,7 @@ def normalize_record_links(record: Dict) -> None:
     output["law_links"] = deduped
     record["output"] = output
 
-# --- Yeni process_file: JSONL → JSON array → normalize → JSONL ---
+# --- process_file: JSONL → JSON array → normalize → JSONL ---
 def process_file(input_path: str, output_path: str) -> None:
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Bulunamadı: {input_path}")
@@ -228,7 +228,8 @@ def process_file(input_path: str, output_path: str) -> None:
 
 
 if __name__ == "__main__":
-    IN_FILE = "03_validate_normalize.jsonl"  # artık JSONL
+    IN_FILE = "03_validate_normalize.jsonl"  # JSONL
     OUT_FILE = "04_link_laws.jsonl"  # JSONL çıktı
     process_file(IN_FILE, OUT_FILE)
+
 
