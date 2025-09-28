@@ -67,7 +67,6 @@ Verilen karar metnine göre, aşağıda sağlanan JSON formatına uygun olarak m
 - Zorunlu alanlar: dava_turu, taraf_iliskisi, sonuc, karar, gerekce, basvuru_yolu, adimlar, hikaye.
 - Mercii uyumu: ILK_DERECE → İlk Derece Mahkemesi; ISTINAF_* → Bölge Adliye Mahkemesi; TEMYIZ_* ve diğer üst aşamalar → Yargıtay; DIGER → içeriğe göre seç.
 - `BOZMA`: Yalnızca hükmün açıkça bozulduğu durumlarda kullanılır. Ek karar kaldırma, usuli düzeltme vb. özel durumlar için `DIGER` seçilmelidir.
-- dava_turu alanı hiçbir zaman null olamaz. Her durumda, metni en iyi özetleyen, doğal Türkçe bir konu başlığı üret. Açık tür belirtilmemişse dahi en yakın genel başlığı seç (örn. “dava”, “alacak”, “tazminat”, “icra/şikâyet”).
 - `metin_esas_no` / `metin_karar_no`: Metinde “Esas No”, “Karar No”, “E.” veya “K.” şeklinde geçen tüm numaralar listeye eklenmeli. Hiç yoksa `[null]` yaz. Aynı numara birden fazla geçse bile listede **yalnızca bir kez** yer almalıdır.  
 - `ad`: Yalnızca şemadaki değerler kullanılabilir; uydurma ad (ör. KARAR_DUZELTME_INCELEME) yazılamaz. Gerekirse `DIGER` kullanılmalı. Büyük harflerle yazılmalı.
 - `basvuru_yolu`: Temyiz varsa daima `"temyiz"`. İstinaf varsa `"istinaf"`. Karar düzeltme tek başına varsa `"karar_düzeltme"`. Hiçbiri yoksa `"yok"`. Süreçte geçen her yol listelenmeli.
