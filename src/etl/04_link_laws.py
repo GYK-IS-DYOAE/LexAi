@@ -228,6 +228,7 @@ def process_file(input_path: str, output_path: str) -> None:
 
 
 if __name__ == "__main__":
-    IN_FILE = "02_extract_llm.jsonl"  # artık JSONL
-    OUT_FILE = "02_extract_llm.linked.jsonl"  # JSONL çıktı
+    IN_FILE = "03_validate_normalize.jsonl"  # artık JSONL
+    OUT_FILE = "04_link_laws.jsonl"  # JSONL çıktı
     process_file(IN_FILE, OUT_FILE)
+
