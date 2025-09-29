@@ -3,18 +3,19 @@ import os
 import re
 from typing import Dict, List, Optional, Tuple
 
-
 # Statik bilinen kısaltmalar ve eski kanunlar
 STATIC_ALIASES: Dict[str, Dict[str, str]] = {
     # HUMK (1086)
     "HUMK": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
     "HMUK": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
     "1086 sayılı HUMK": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
+    "1086 sayılı Kanun": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
     "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
 
     # HMK (6100)
     "HMK": {"canonical": "6100 sayılı Hukuk Muhakemeleri Kanunu", "law_id": "6100"},
     "6100 sayılı HMK": {"canonical": "6100 sayılı Hukuk Muhakemeleri Kanunu", "law_id": "6100"},
+    "6100 sayılı Kanun": {"canonical": "6100 sayılı Hukuk Muhakemeleri Kanunu", "law_id": "6100"},
     "6100 sayılı Hukuk Muhakemeleri Kanunu": {"canonical": "6100 sayılı Hukuk Muhakemeleri Kanunu", "law_id": "6100"},
 
     # Diğer örnekler
@@ -27,7 +28,10 @@ STATIC_ALIASES: Dict[str, Dict[str, str]] = {
 DYNAMIC_ALIASES: Dict[str, Dict[str, str]] = {}
 
 LAW_NAME_PATTERN = re.compile(
-    r"(?:(?P<law_id>\d{3,4})\s*sayılı\s*)?(?P<name>HUMK|HMUK|HMK|Hukuk\s+Usulü\s+Muhakemeleri\s+Kanunu|Hukuk\s+Muhakemeleri\s+Kanunu|Sosyal\s+Hizmetler\s+Kanunu|Çocuk\s+Koruma\s+Kanunu|\d{3,4}\s*sayılı\s*Kanun)",
+    r"(?:(?P<law_id>\d{3,4})\s*sayılı\s*)?"
+    r"(?P<name>HUMK|HMUK|HMK|Hukuk\s+Usulü\s+Muhakemeleri\s+Kanunu|"
+    r"Hukuk\s+Muhakemeleri\s+Kanunu|Sosyal\s+Hizmetler\s+Kanunu|"
+    r"Çocuk\s+Koruma\s+Kanunu|\d{3,4}\s*sayılı\s*Kanun)",
     flags=re.IGNORECASE,
 )
 ARTICLE_PATTERN = re.compile(
@@ -47,10 +51,10 @@ def hydrate_dynamic_aliases() -> None:
         return
 
     catalog_paths = [
-        "mevzuat-kanunlar.json",
-        "mevzuat.json",
-        "mevzuat_meta_metadata.json",
-        "cb_bk__kurulu_yonetmelik",
+        "/Users/eslemnurgok/Downloads/LexAi/data/raw/mevzuat-kanunlar.json",
+        "/Users/eslemnurgok/Downloads/LexAi/data/raw/mevzuat.json",
+        "/Users/eslemnurgok/Downloads/LexAi/data/raw/mevzuat_meta_metadata.json",
+        "/Users/eslemnurgok/Downloads/LexAi/data/raw/cb_bk__kurulu_yonetmelik.json",
         "cb_kararname.json",
     ]
 
@@ -89,6 +93,11 @@ def hydrate_dynamic_aliases() -> None:
 def normalize_law_name(raw: str) -> Tuple[str, Optional[str]]:
     """Ham kanun ismini canonical ve law_id’ye dönüştürür."""
     key = raw.strip()
+
+    # Boş veya saçma değerler düzeltiliyor
+    if not key or key.upper() in {"SAYILI", "HUKUK"}:
+        return None, None
+
     if key in STATIC_ALIASES:
         m = STATIC_ALIASES[key]
         return m["canonical"], m.get("law_id")
@@ -101,13 +110,24 @@ def normalize_law_name(raw: str) -> Tuple[str, Optional[str]]:
     for alias, meta in DYNAMIC_ALIASES.items():
         if key.lower() == alias.lower():
             return meta["canonical"], meta.get("law_id")
+
+    # Eğer sadece "XXXX sayılı Kanun" gelirse
     m = re.search(r"(\d{3,4})\s*sayılı", key)
-    law_id = m.group(1) if m else None
-    return key, law_id
+    if m:
+        law_id = m.group(1)
+        if law_id == "1086":
+            return "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "1086"
+        if law_id == "6100":
+            return "6100 sayılı Hukuk Muhakemeleri Kanunu", "6100"
+        return f"{law_id} sayılı Kanun", law_id
+
+    return key, None
 
 def build_candidate_urls(canonical_name: str, law_id: Optional[str], article: Optional[str]) -> List[str]:
     """Kanun ve madde bazlı bilgilendirici URL pattern’leri oluşturur."""
     urls: List[str] = []
+    if not canonical_name:
+        return urls
     query = canonical_name
     if article:
         query += f" madde {article}"
@@ -126,6 +146,8 @@ def scan_text_for_laws(text: str) -> List[Dict[str, Optional[str]]]:
     for match in LAW_NAME_PATTERN.finditer(text):
         raw_name = match.group(0)
         canonical, law_id = normalize_law_name(raw_name)
+        if not canonical:
+            continue
         tail = text[match.end(): match.end() + 80]
         art = None
         par = None
@@ -149,12 +171,14 @@ def scan_text_for_laws(text: str) -> List[Dict[str, Optional[str]]]:
 
 def normalize_record_links(record: Dict) -> None:
     """Bir kayıttaki tüm kanun referanslarını normalize eder ve law_links alanına ekler."""
-    output = record.get("output", {})
     law_links: List[Dict[str, Optional[str]]] = []
 
-    for ref in output.get("kanun_atiflari", []) or []:
+    # 1. kanun_atiflari
+    for ref in record.get("kanun_atiflari", []) or []:
         raw_name = ref.get("kanun") or ""
         canonical, law_id = normalize_law_name(raw_name)
+        if not canonical:
+            continue
         article = ref.get("madde")
         paragraph = ref.get("fikra")
         span = ref.get("span")
@@ -169,17 +193,20 @@ def normalize_record_links(record: Dict) -> None:
             "candidate_urls": build_candidate_urls(canonical, law_id, article),
         })
 
+    # 2. metin alanlarından tarama
     text_fields: List[str] = []
-    if isinstance(output.get("karar"), str):
-        text_fields.append(output["karar"])
-    if isinstance(output.get("gerekce"), list):
-        text_fields.extend([g for g in output["gerekce"] if isinstance(g, str)])
-    if isinstance(output.get("hikaye"), list):
-        text_fields.extend([h for h in output["hikaye"] if isinstance(h, str)])
+    if isinstance(record.get("karar"), str):
+        text_fields.append(record["karar"])
+    if isinstance(record.get("gerekce"), list):
+        text_fields.extend([g for g in record["gerekce"] if isinstance(g, str)])
+    if isinstance(record.get("hikaye"), list):
+        text_fields.extend([h for h in record["hikaye"] if isinstance(h, str)])
+
     for txt in text_fields:
         for link in scan_text_for_laws(txt):
             law_links.append(link)
 
+    # 3. tekilleştirme
     seen = set()
     deduped: List[Dict] = []
     for l in law_links:
@@ -189,17 +216,15 @@ def normalize_record_links(record: Dict) -> None:
         seen.add(key)
         deduped.append(l)
 
-    output["law_links"] = deduped
-    record["output"] = output
+    record["law_links"] = deduped
 
-# --- process_file: JSONL → JSON array → normalize → JSONL ---
 def process_file(input_path: str, output_path: str) -> None:
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"Bulunamadı: {input_path}")
 
     hydrate_dynamic_aliases()
 
-    # 1. JSONL okuma
+    # 1. JSONL oku
     records = []
     with open(input_path, "r", encoding="utf-8") as f:
         for line in f:
@@ -210,26 +235,23 @@ def process_file(input_path: str, output_path: str) -> None:
             except Exception:
                 continue
 
-    # 2. Normalize
+    # 2. normalize
     for idx, record in enumerate(records, start=1):
         try:
-            normalize_record_links(record)
+            normalize_record_links(record["record"])
         except Exception:
             pass
         if idx % 1000 == 0:
             print(f"İşlenen kayıt: {idx}")
 
-    # 3. Tekrar JSONL yaz
+    # 3. tekrar JSONL yaz
     with open(output_path, "w", encoding="utf-8") as f:
         for rec in records:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     print(f"Tamamlandı. Çıktı: {output_path}")
 
-
 if __name__ == "__main__":
-    IN_FILE = "03_validate_normalize.jsonl"  # JSONL
-    OUT_FILE = "04_link_laws.jsonl"  # JSONL çıktı
+    IN_FILE = "/Users/eslemnurgok/Downloads/LexAi/data/interim/03_validated.jsonl"
+    OUT_FILE = "/Users/eslemnurgok/Downloads/LexAi/data/interim/04_link_laws.jsonl"
     process_file(IN_FILE, OUT_FILE)
-
-
