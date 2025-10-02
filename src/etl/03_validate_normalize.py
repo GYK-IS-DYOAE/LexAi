@@ -157,7 +157,7 @@ def normalize_basvuru_yolu(raw) -> list:
 # ==============================
 def main():
     if not INPUT_PATH.exists():
-        print(f"❌ Girdi dosyası bulunamadı: {INPUT_PATH}")
+        print(f"Girdi dosyası bulunamadı: {INPUT_PATH}")
         return
 
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
