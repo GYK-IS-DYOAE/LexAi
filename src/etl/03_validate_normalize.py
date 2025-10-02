@@ -2,12 +2,12 @@
 03_validate_normalize.py
 ------------------------
 Amaç:
-- 02_extract_llm_parsed.json içindeki LLM JSON çıktısını şemaya göre doğrulamak ve normalize etmek.
+- 02_extract_llm.jsonl içindeki LLM JSON çıktısını şemaya göre doğrulamak ve normalize etmek.
 - Kurallar:
   * 'sonuc' alanını sabit listeye göre normalize eder: onama|bozma|ret|kabul|vs.
   * 'kanun_atiflari' içindeki 'kanun' ve 'madde' ayrıştırılır.
   * Tarihler YYYY-MM-DD formatına çevrilir.
-  * 'adimlar' içindeki 'spans': [] olan adımlar çıkarılır.
+  * 'adimlar' aynen korunur (hiçbir silme yapılmaz).
   * Kalite bayrakları eklenir: law_without_span, few_steps, steps_dropped.
 """
 
@@ -16,17 +16,26 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-INPUT_PATH = Path("data/interim/02_extract_llm_parsed.json")
+# ==============================
+# Config
+# ==============================
+INPUT_PATH = Path("data/interim/02_extract_llm.jsonl")
 OUTPUT_PATH = Path("data/interim/03_validated.jsonl")
 
 VALID_SONUC_VALUES = [
-    "onama", "bozma", "kısmen_bozma", "duzelterek_onama", "ret", "kabul",
-    "kısmen_kabul", "diger"
+    "onama", "bozma", "kısmen_bozma", "duzelterek_onama",
+    "ret", "kabul", "kısmen_kabul", "diger"
 ]
 
-KANUN_REGEX = re.compile(r"\b([A-ZÇĞİÖŞÜ]{2,5})\b")
-TARIH_FORMATLARI = ("%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y")
+KANUN_REGEX = re.compile(r"\b([A-ZÇĞİÖŞÜ]{2,6})\b")  # HUMK, HMK, TBK vs.
+TARIH_FORMATLARI = (
+    "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y",
+    "%d-%m-%Y", "%Y/%m/%d"
+)
 
+# ==============================
+# Helpers
+# ==============================
 def normalize_date(s):
     if not s or not isinstance(s, str):
         return None
@@ -57,6 +66,9 @@ def normalize_kanun(kanun_str):
     match = KANUN_REGEX.search(kanun_str.upper())
     return match.group(1) if match else None
 
+# ==============================
+# Validation & Normalization
+# ==============================
 def validate_and_normalize_record(_id, content):
     record = content.copy()
     quality_flags = []
@@ -87,7 +99,7 @@ def validate_and_normalize_record(_id, content):
             record["kanun_atiflari"][i] = {
                 "kanun": None, "madde": None, "fikra": None, "span": str(k)
             }
-    # quality flag
+
     if any(k.get("kanun") and not k.get("span") for k in record.get("kanun_atiflari", [])):
         quality_flags.append("law_without_span")
 
@@ -108,19 +120,11 @@ def validate_and_normalize_record(_id, content):
         if "tarih" in item:
             item["tarih"] = normalize_date(item["tarih"])
 
-    # ADIMLAR: spans boşsa çıkar
+    # ADIMLAR: silme yok, sadece flagle
     steps = record.get("adimlar", [])
-    kept, dropped = [], 0
-    for a in steps:
-        if isinstance(a, dict) and a.get("spans"):
-            kept.append(a)
-        else:
-            dropped += 1
-    record["adimlar"] = kept
-    if dropped > 0:
+    if any(isinstance(a, dict) and not a.get("spans") for a in steps):
         quality_flags.append("steps_dropped")
-
-    if len(kept) < 3:
+    if len(steps) < 3:
         quality_flags.append("few_steps")
 
     # HIKAYE normalize
@@ -138,23 +142,30 @@ def validate_and_normalize_record(_id, content):
         "quality_flags": sorted(list(set(quality_flags)))
     }
 
+# ==============================
+# Main
+# ==============================
 def main():
     if not INPUT_PATH.exists():
         print(f"❌ Girdi dosyası bulunamadı: {INPUT_PATH}")
         return
 
-    parsed = json.loads(INPUT_PATH.read_text(encoding="utf-8"))
     OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
 
-    with OUTPUT_PATH.open("w", encoding="utf-8") as out_f:
-        for _id, content in parsed.items():
+    with INPUT_PATH.open("r", encoding="utf-8") as f_in, OUTPUT_PATH.open("w", encoding="utf-8") as out_f:
+        for line in f_in:
+            if not line.strip():
+                continue
             try:
+                item = json.loads(line)
+                _id = item.get("Id") or item.get("id")
+                content = item.get("output", {})
                 result = validate_and_normalize_record(_id, content)
                 out_f.write(json.dumps(result, ensure_ascii=False) + "\n")
             except Exception as e:
                 out_f.write(json.dumps({
-                    "id": _id,
-                    "record": content,
+                    "id": item.get("Id") if "item" in locals() else None,
+                    "record": item if "item" in locals() else None,
                     "quality_flags": ["processing_error"],
                     "error": str(e)
                 }, ensure_ascii=False) + "\n")
