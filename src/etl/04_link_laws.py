@@ -215,7 +215,7 @@ def main():
                     help="Mevzuat kataloğu (JSONL)")
     ap.add_argument("--inp", default="data/interim/03_validated.jsonl",
                     help="Zenginleştirilecek dosya (JSONL)")
-    ap.add_argument("--out", default="data/interim/03_validated.linked.jsonl",
+    ap.add_argument("--out", default="data/interim/04_link_law.jsonl",
                     help="Çıktı (JSONL)")
     args = ap.parse_args()
 

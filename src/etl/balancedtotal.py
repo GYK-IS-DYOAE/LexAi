@@ -2,7 +2,7 @@ import json
 import random
 from collections import defaultdict
 
-INPUT = "data/interim/03_validated.linked.jsonl"
+INPUT = "data/interim/04_link_law.jsonl"
 OUT_FILE = "data/interim/balanced_total30k.jsonl"
 
 TOTAL_TARGET = 30000
@@ -47,4 +47,4 @@ with open(OUT_FILE, "w", encoding="utf-8") as f:
     for rec in balanced_records:
         f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
-print(f"✅ Balanced dataset saved to {OUT_FILE} | Toplam kayıt: {len(balanced_records)}")
+print(f" Balanced dataset saved to {OUT_FILE} | Toplam kayıt: {len(balanced_records)}")
