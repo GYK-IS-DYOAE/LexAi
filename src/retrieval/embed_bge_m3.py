@@ -1,4 +1,4 @@
-# /Users/eslemnurgok/Downloads/LexAi/src/retrieval/embed_bge_m3.py
+LexAi/src/retrieval/embed_bge_m3.py
 
 import json
 import time
