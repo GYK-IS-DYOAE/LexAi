@@ -1,71 +1,43 @@
+# src/retrieval/search_opensearch.py
+# ==========================================================
+# OpenSearch içinde BM25 tabanlı arama yapar
+# ==========================================================
+
 import sys
 from opensearchpy import OpenSearch
 
-"""
-search_opensearch.py
--------------------
-Amaç:
-- OpenSearch içinde indekslenmiş karar verilerinde BM25 tabanlı arama yapmak.
-- Kullanıcının verdiği sorguyu (ör. "ziynet alacağı") dava_turu, taraf_iliskisi,
-  sonuc, karar, gerekce, hikaye alanlarında aratır.
-
-Girdi:
-- Komut satırından sorgu (örn: "ziynet alacağı")
-
-Çıktı:
-- İlk 5 sonucun doc_id, dava_turu, sonuc, metin_karar_no bilgileri
-
-Bağımlılıklar:
-- Python paketleri: opensearch-py
-- Docker: OpenSearch’in çalışıyor olması gerekir.
-  👉 Başlatmak için:
-     $ docker start opensearch
-  veya ilk kez kurulum için:
-     $ docker run -d --name opensearch -p 9200:9200 -p 9600:9600 \
-       -e "discovery.type=single-node" \
-       -e "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Lexai_1234!" \
-       opensearchproject/opensearch:2.15.0
-
-Nasıl çalıştırılır:
-$ python scripts/search_opensearch.py "ziynet alacağı"
-"""
-
-# ==============================
-# Config
-# ==============================
+# ============================== Config ==============================
 INDEX_NAME = "lexai_cases"
 OPENSEARCH_HOST = "localhost"
 OPENSEARCH_PORT = 9200
-USERNAME = "admin"
-PASSWORD = "Lexai_1234!"   # Docker başlatırken verdiğin şifre
 
-# ==============================
-# Connect
-# ==============================
+# ============================== Connect ==============================
 client = OpenSearch(
     hosts=[{"host": OPENSEARCH_HOST, "port": OPENSEARCH_PORT}],
-    http_auth=(USERNAME, PASSWORD),
-    use_ssl=True,          # ✅ HTTPS
-    verify_certs=False,    # test için self-signed cert kontrol etme
+    scheme="http",        # ✅ çünkü security kapalı
+    use_ssl=False,        # ✅ çünkü TLS yok
+    verify_certs=False,
     ssl_show_warn=False
 )
 
-# ==============================
-# Search
-# ==============================
+# ============================== Search ==============================
 def search(query):
     body = {
         "size": 5,
         "query": {
             "multi_match": {
                 "query": query,
-                "fields": ["dava_turu", "taraf_iliskisi", "sonuc", "karar", "gerekce", "hikaye"]
+                "fields": [
+                    "dava_turu", "taraf_iliskisi", "sonuc",
+                    "karar", "gerekce", "hikaye"
+                ]
             }
         }
     }
     results = client.search(index=INDEX_NAME, body=body)
     return results
 
+# ============================== CLI ==============================
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python search_opensearch.py '<query>'")
@@ -82,4 +54,8 @@ if __name__ == "__main__":
         print(f"   dava_turu: {src.get('dava_turu')}")
         print(f"   sonuc: {src.get('sonuc')}")
         print(f"   metin_karar_no: {src.get('metin_karar_no')}")
+        print(f"   metin: {src.get('hikaye')}")
         print()
+
+
+#python src\retrieval\search_opensearch.py "ziynet alacağı"

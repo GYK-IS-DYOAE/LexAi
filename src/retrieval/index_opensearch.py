@@ -1,119 +1,103 @@
+# src/retrieval/index_opensearch.py
+# ==========================================================
+# Karar verilerini OpenSearch'e indeksleme (BM25 keyword arama için)
+# ==========================================================
+
 import json
-from pathlib import Path
 from opensearchpy import OpenSearch, helpers
 from tqdm import tqdm
+from pathlib import Path
 
-"""
-index_opensearch.py
--------------------
-Amaç:
-- Karar verilerini (records.jsonl) OpenSearch içine indekslemek.
-- BM25 tabanlı arama yapılabilmesi için mapping ve bulk insert işlemleri yapmak.
-
-Girdi:
-- data/processed/records.jsonl
-
-Çıktı:
-- OpenSearch index: lexai_cases
-
-Bağımlılıklar:
-- Python paketleri: opensearch-py, tqdm
-- Docker: OpenSearch’in çalışıyor olması gerekir.
-  👉 OpenSearch başlatmak için:
-     $ docker run -d --name opensearch -p 9200:9200 -p 9600:9600 \
-       -e "discovery.type=single-node" \
-       -e "OPENSEARCH_INITIAL_ADMIN_PASSWORD=Lexai_1234!" \
-       opensearchproject/opensearch:2.15.0
-
-Notlar:
-- Kullanıcı adı: admin
-- Şifre: Docker’da verdiğin `OPENSEARCH_INITIAL_ADMIN_PASSWORD`
-- Mapping: dava_turu, taraf_iliskisi, sonuc, karar, gerekce, hikaye alanları `text`;
-           metin_esas_no, metin_karar_no `keyword`; kanun_atiflari, onemli_tarihler `nested`.
-
-Nasıl çalıştırılır:
-$ python scripts/index_opensearch.py
-"""
-
-# ==============================
-# Config
-# ==============================
-INPUT_FILE = "data/processed/records.jsonl"
+# ============================== Config ==============================
+INPUT_FILE = "data/interim/balanced_total30k.jsonl"
 INDEX_NAME = "lexai_cases"
 
 OPENSEARCH_HOST = "localhost"
 OPENSEARCH_PORT = 9200
-USERNAME = "admin"
-PASSWORD = "Lexai_1234!"   # Docker başlatırken verdiğin şifre
 
-BATCH_SIZE = 1000   # bulk insert batch
+BATCH_SIZE = 500  # önerilen
+VERIFY_CERTS = False
 
-# ==============================
-# Connect OpenSearch (HTTPS)
-# ==============================
+# ============================== Connect ==============================
 client = OpenSearch(
     hosts=[{"host": OPENSEARCH_HOST, "port": OPENSEARCH_PORT}],
-    http_auth=(USERNAME, PASSWORD),
-    scheme="https",          # ✅ HTTPS kullan
-    use_ssl=True,            # ✅ SSL aç
-    verify_certs=False       # self-signed sertifika için
+    scheme="http",            # ✅ HTTP çünkü security kapalı
+    use_ssl=False,            # ✅ TLS yok
+    verify_certs=VERIFY_CERTS,
+    ssl_assert_hostname=False,
+    ssl_show_warn=False,
+    timeout=60
 )
 
-# ==============================
-# Create index (reset if exists)
-# ==============================
+# ============================== Index Reset ==============================
 if client.indices.exists(index=INDEX_NAME):
+    print(f"⚠️  Index '{INDEX_NAME}' already exists → deleting...")
     client.indices.delete(index=INDEX_NAME)
 
 settings = {
     "settings": {
         "index": {
             "number_of_shards": 1,
-            "number_of_replicas": 0
+            "number_of_replicas": 0,
+            "analysis": {
+                "analyzer": {
+                    "turkish_text": {
+                        "type": "custom",
+                        "tokenizer": "standard",
+                        "filter": ["lowercase", "asciifolding"]
+                    }
+                }
+            }
         }
     },
     "mappings": {
         "properties": {
             "doc_id": {"type": "keyword"},
-            "dava_turu": {"type": "text"},
-            "taraf_iliskisi": {"type": "text"},
-            "sonuc": {"type": "text"},
+            "dava_turu": {"type": "text", "analyzer": "turkish_text"},
+            "taraf_iliskisi": {"type": "text", "analyzer": "turkish_text"},
+            "sonuc": {"type": "text", "analyzer": "turkish_text"},
             "metin_esas_no": {"type": "keyword"},
             "metin_karar_no": {"type": "keyword"},
             "kanun_atiflari": {"type": "nested"},
             "onemli_tarihler": {"type": "nested"},
-            "karar": {"type": "text"},
-            "gerekce": {"type": "text"},
-            "hikaye": {"type": "text"}
+            "karar": {"type": "text", "analyzer": "turkish_text"},
+            "gerekce": {"type": "text", "analyzer": "turkish_text"},
+            "hikaye": {"type": "text", "analyzer": "turkish_text"}
         }
     }
 }
 
 client.indices.create(index=INDEX_NAME, body=settings)
+print(f"✅ Created index '{INDEX_NAME}'")
 
-# ==============================
-# Load subset of data
-# ==============================
+# ============================== Load & Bulk Insert ==============================
+docs_path = Path(INPUT_FILE)
+if not docs_path.exists():
+    raise FileNotFoundError(f"Girdi dosyası bulunamadı: {INPUT_FILE}")
+
 docs = []
 with open(INPUT_FILE, "r", encoding="utf-8") as f:
     for i, line in enumerate(f):
-        if i >= 1000:  # sadece ilk 1000 kayıt test için
+        if i >= 1000:
             break
         rec = json.loads(line)
-        docs.append(rec)
+        _id = str(rec.get("doc_id") or f"auto_{i}")
+        docs.append({"_id": _id, "_source": rec})
 
 print(f"✅ Loaded {len(docs)} docs for test insert")
 
-# ==============================
-# Bulk insert
-# ==============================
 def gendata():
-    for rec in docs:
+    for d in docs:
         yield {
             "_index": INDEX_NAME,
-            "_id": rec["doc_id"],
-            "_source": rec
+            "_id": d["_id"],
+            "_source": d["_source"]
         }
 
-helpers.bulk(client, gendata(), chunk_size=BATCH_SIZE)
+print("⚙️  Bulk inserting...")
+helpers.bulk(client, gendata(), chunk_size=BATCH_SIZE, request_timeout=120)
 print("🎉 Test data inserted into OpenSearch successfully!")
+
+# ============================== Sanity Check ==============================
+count = client.count(index=INDEX_NAME)["count"]
+print(f"📊 Indexed documents: {count}")

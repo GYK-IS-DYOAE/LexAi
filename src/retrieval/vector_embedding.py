@@ -33,8 +33,8 @@ QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 QDRANT_GRPC_PORT = 6334
 
-CHUNK_SIZE_RECORDS = 3_000       # her 3k kayıt = 1 chunk
-EMB_BATCH_SIZE = 16              # 4GB VRAM için güvenli
+CHUNK_SIZE_RECORDS = 3_000       # her 3k kayıt = 1 chunk (CPU/RAM)
+EMB_BATCH_SIZE = 32             
 QDRANT_UPSERT_BATCH = 128        # 32MB limitine takılmamak için
 
 MODEL_NAME = "BAAI/bge-m3"
@@ -47,21 +47,20 @@ CHUNK_CHAR = 1500
 CHUNK_OVERLAP = 100
 MIN_CHAR = 40
 
-# Depolama/metadata tercihleri
-SAVE_TEMP_FILES = False          # True ise .npy/.jsonl yazıp upload sonrası hemen siler
+# Depolama/metadata 
+SAVE_TEMP_FILES = False       
 STORE_FULL_TEXT_IN_QDRANT = False
-TEXT_PREVIEW_CHARS = 200         # tam metin yerine kısa özet (preview)
-ENABLE_INT8_QUANTIZATION = True  # koleksiyonu INT8 ile kur → ~4x daha az disk
-# ============================================
+TEXT_PREVIEW_CHARS = 200        
+DECISION_PREVIEW_CHARS = 1000    
+ENABLE_INT8_QUANTIZATION = True  
 
 
-# ================== Helpers ==================
 def sha1(s: str) -> str:
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
 
 def make_point_id(m: Dict[str, Any]) -> int:
-    """Deterministik 64-bit int ID: gRPC'nin int/uuid kısıtına uyar."""
-    base = f"{m.get('doc_id','')}|{m.get('section','')}|{m.get('char_start',0)}|{m.get('text_sha1','')}"
+    """Deterministik 64-bit int ID."""
+    base = f"{m.get('doc_id','')}|{m.get('section','')}|{m.get('text_sha1','')}"
     # SHA1'den ilk 16 hex = 64-bit integer
     return int(hashlib.sha1(base.encode("utf-8")).hexdigest()[:16], 16)
 
@@ -89,27 +88,27 @@ def chunk_text(txt: str, size: int = CHUNK_CHAR, overlap: int = CHUNK_OVERLAP) -
 
 def add_text_segment(records: List[str], metas: List[Dict[str,Any]],
                      text: Any, rec: Dict[str,Any], section: str) -> None:
+    """Bölüm metnini (gerekçe/hikaye) parçalara böl ve payload hazırla.
+       Karar metni embed edilmez; preview'ı metadata olarak eklenir."""
     if text is None: return
+    karar_full = (rec.get("karar") or rec.get("karar_metni") or "").strip()
+    karar_preview = karar_full[:DECISION_PREVIEW_CHARS] if karar_full else None
+
     texts = text if isinstance(text, list) else [text]
     for t in texts:
         if not isinstance(t, str): continue
         t = t.strip()
         if not t: continue
-        for ci, (start, end, piece) in enumerate(chunk_text(t, CHUNK_CHAR, CHUNK_OVERLAP)):
+        for _ci, (_start, _end, piece) in enumerate(chunk_text(t, CHUNK_CHAR, CHUNK_OVERLAP)):
             if len(piece.strip()) < MIN_CHAR: continue
             payload = {
                 "doc_id": rec.get("doc_id"),
                 "section": section,
-                "chunk_index": ci,
-                "char_start": start,
-                "char_end": end,
                 "dava_turu": rec.get("dava_turu"),
-                "taraf_iliskisi": rec.get("taraf_iliskisi"),
                 "sonuc": rec.get("sonuc"),
                 "metin_esas_no": rec.get("metin_esas_no"),
                 "metin_karar_no": rec.get("metin_karar_no"),
                 "kanun_atiflari": rec.get("kanun_atiflari"),
-                "onemli_tarihler": rec.get("onemli_tarihler"),
                 "adimlar": [
                     {"no": i+1, "aciklama": a}
                     for i, a in enumerate(safe_list(rec.get("adimlar")))
@@ -120,6 +119,9 @@ def add_text_segment(records: List[str], metas: List[Dict[str,Any]],
                 payload["text"] = piece
             else:
                 payload["text_preview"] = piece[:TEXT_PREVIEW_CHARS]
+            if karar_preview:
+                payload["karar_preview"] = karar_preview
+
             records.append(piece)
             metas.append(payload)
 
@@ -145,7 +147,6 @@ def ensure_collection(client: QdrantClient, vector_size: int, state: Dict[str,An
         return
     except Exception:
         pass
-    # oluştur (INT8 quantization ile)
     vectors_cfg = rest.VectorParams(size=vector_size, distance=rest.Distance.COSINE)
     if ENABLE_INT8_QUANTIZATION:
         vectors_cfg.quantization_config = rest.ScalarQuantization(
@@ -169,7 +170,6 @@ def upsert_with_retry(client: QdrantClient, points: List[rest.PointStruct]) -> N
             client.upsert(collection_name=COLLECTION_NAME, points=cur, wait=True)
             return
         except UnexpectedResponse as e:
-            # 400 payload too large → batch'i ikiye böl
             if "larger than allowed" in str(e) and len(cur) > 1:
                 mid = len(cur) // 2
                 upsert_with_retry(client, cur[:mid])
@@ -184,13 +184,20 @@ def upsert_with_retry(client: QdrantClient, points: List[rest.PointStruct]) -> N
 
 def pick_device() -> str:
     if torch.cuda.is_available():
-        try: print("CUDA GPU:", torch.cuda.get_device_name(0))
-        except Exception: print("CUDA kullanılabilir.")
+        try:
+            print("CUDA GPU:", torch.cuda.get_device_name(0))
+        except Exception:
+            print("CUDA kullanılabilir.")
+        try:
+            torch.set_float32_matmul_precision("high")
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
         return "cuda"
     print("CUDA bulunamadı, CPU kullanılacak.")
     return "cpu"
 
-# ================== Model / Upload ==================
 @dataclass
 class ChunkPack:
     idx: int
@@ -208,20 +215,22 @@ def process_and_upload_chunk(model: SentenceTransformer,
         emb = np.zeros((0, model.get_sentence_embedding_dimension()), dtype=np.float32)
     else:
         all_embeddings = []
-        for i in tqdm(range(0, len(recs), EMB_BATCH_SIZE), desc=f"Chunk {pack.idx} embedding"):
-            batch_texts = recs[i:i+EMB_BATCH_SIZE]
-            e = model.encode(batch_texts, batch_size=EMB_BATCH_SIZE, normalize_embeddings=True, show_progress_bar=False)
-            all_embeddings.append(e)
-        emb = np.vstack(all_embeddings)
-
-    # (Opsiyonel) geçici diske yazma
-    emb_path = OUT_DIR / f"embeddings_chunk_{pack.idx}.npy"
-    meta_path = OUT_DIR / f"metadata_chunk_{pack.idx}.jsonl"
-    if SAVE_TEMP_FILES:
-        np.save(emb_path, emb)
-        with meta_path.open("w", encoding="utf-8", newline="\n") as f:
-            for m in metas:
-                f.write(json.dumps(m, ensure_ascii=False) + "\n")
+        bs = EMB_BATCH_SIZE
+        i = 0
+        while i < len(recs):
+            try:
+                batch_texts = recs[i:i+bs]
+                e = model.encode(batch_texts, batch_size=bs, normalize_embeddings=True, show_progress_bar=False)
+                all_embeddings.append(e)
+                i += bs
+            except RuntimeError as ex:
+                if "CUDA out of memory" in str(ex) and bs > 4:
+                    bs = max(4, bs // 2)
+                    print(f"[Embed] OOM yakalandı, batch size {bs} yapıldı, devam...")
+                    torch.cuda.empty_cache()
+                    continue
+                raise
+        emb = np.vstack(all_embeddings) if all_embeddings else np.zeros((0, model.get_sentence_embedding_dimension()), dtype=np.float32)
 
     print(f"[Upload] Chunk {pack.idx} starting | vectors={emb.shape[0] if emb is not None else 0}")
     total = emb.shape[0]
@@ -239,12 +248,11 @@ def process_and_upload_chunk(model: SentenceTransformer,
     # (Opsiyonel) upload başarılıysa geçici dosyaları sil
     if SAVE_TEMP_FILES:
         try:
-            emb_path.unlink(missing_ok=True)
-            meta_path.unlink(missing_ok=True)
+            (OUT_DIR / f"embeddings_chunk_{pack.idx}.npy").unlink(missing_ok=True)
+            (OUT_DIR / f"metadata_chunk_{pack.idx}.jsonl").unlink(missing_ok=True)
         except Exception:
             pass
 
-# ================== Main ==================
 def main():
     device = pick_device()
     print(f"→ Using device: {device}")
@@ -281,9 +289,9 @@ def main():
                     continue
 
                 rec = json.loads(line)
-                add_text_segment(records, metas, rec.get("karar"), rec, "karar")
+
                 add_text_segment(records, metas, rec.get("gerekce"), rec, "gerekce")
-                add_text_segment(records, metas, rec.get("hikaye"), rec, "hikaye")
+                add_text_segment(records, metas, rec.get("hikaye"),  rec, "hikaye")
 
                 lines_in_chunk += 1
                 if lines_in_chunk == CHUNK_SIZE_RECORDS:
@@ -315,9 +323,9 @@ def main():
 
         print("🎉 Done.")
     except KeyboardInterrupt:
-        print("\n⛔ Interrupted by user. (Son TAM chunk'a kadar yüklendi)")
+        print("\nInterrupted by user. (Son TAM chunk'a kadar yüklendi)")
     except Exception as e:
-        print(f"❌ Hata: {e}")
+        print(f"Hata: {e}")
         raise
 
 if __name__ == "__main__":

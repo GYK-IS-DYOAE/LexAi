@@ -1,80 +1,112 @@
+# src/retrieval/search_qdrant.py
 import sys
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 from sentence_transformers import SentenceTransformer
 import torch
 
-"""
-search_qdrant.py
--------------------
-Amaç:
-- Kullanıcının yazdığı serbest metin sorgusunu (`query`) embedding’e çevirerek
-  Qdrant içindeki vektörler arasında arama yapmak.
-- En benzer kararları getirir.
-
-Girdi:
-- Komut satırından query argümanı
-- Qdrant koleksiyonu: lexai_cases
-
-Çıktı:
-- En benzer 5–10 kaydın doc_id, dava_turu, sonuc, karar_no bilgileri.
-
-Nasıl çalıştırılır:
-$ python scripts/search_qdrant.py "ziynet alacağı"
-"""
-
-# ==============================
-# Config
-# ==============================
 COLLECTION_NAME = "lexai_cases"
 MODEL_NAME = "BAAI/bge-m3"
 
 QDRANT_HOST = "localhost"
-QDRANT_PORT = 6333
+HTTP_PORT = 6333
+GRPC_PORT = 6334
 
-TOP_K = 5  # kaç sonuç dönecek
+TOP_K = 8
 
-# ==============================
-# Load model
-# ==============================
-device = "mps" if torch.backends.mps.is_available() else "cpu"
-print(f"✅ Using device: {device}")
+def pick_device() -> str:
+    if torch.cuda.is_available():
+        try:
+            torch.set_float32_matmul_precision("high")
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
+        print(f"Using device: cuda | GPU: {torch.cuda.get_device_name(0)}")
+        return "cuda"
+    print("Using device: cpu")
+    return "cpu"
 
+device = pick_device()
 model = SentenceTransformer(MODEL_NAME, device=device)
 
-# ==============================
-# Connect to Qdrant
-# ==============================
-client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+# Başta gRPC deneriz; hata olursa otomatik HTTP'ye düşeriz
+client = QdrantClient(
+    host=QDRANT_HOST,
+    port=HTTP_PORT,
+    grpc_port=GRPC_PORT,
+    prefer_grpc=True,
+    timeout=60.0,
+)
 
-# ==============================
-# Query
-# ==============================
-def search(query: str, top_k: int = TOP_K):
-    # Query embedding
-    query_vec = model.encode(query, normalize_embeddings=True).tolist()
+def sanity_checks():
+    info = client.get_collection(COLLECTION_NAME)
+    dim = info.vectors_count or info.config.params.vectors.size  # versiyona göre farklı alanlar olabilir
+    try:
+        model_dim = model.get_sentence_embedding_dimension()
+    except Exception:
+        model_dim = None
+    print(f"[CHECK] collection='{COLLECTION_NAME}', vector_dim={dim}, model_dim={model_dim}")
+    cnt = client.count(COLLECTION_NAME, exact=True).count
+    print(f"[CHECK] points_in_collection={cnt}")
 
-    results = client.query_points(
+def query_once(qvec, top_k):
+    # INT8 quantization varsa sorguda yok say (OutputTooSmall hatasını önler)
+    search_params = rest.SearchParams(
+        quantization=rest.QuantizationSearchParams(ignore=True)
+    )
+    return client.query_points(
         collection_name=COLLECTION_NAME,
-        query=query_vec,
+        query=qvec,
         limit=top_k,
         with_payload=True,
+        search_params=search_params,
     )
 
-    print(f"\n🔎 Query: {query}\n")
-    for i, point in enumerate(results.points, start=1):
-        payload = point.payload or {}
-        print(f"{i}. (score={point.score:.4f})")
-        print(f"   doc_id: {payload.get('doc_id', '—')}")
-        print(f"   dava_turu: {payload.get('dava_turu', '—')}")
-        print(f"   sonuc: {payload.get('sonuc', '—')}")
-        print(f"   metin_karar_no: {payload.get('metin_karar_no', '—')}")
-        print("")
+def search(query: str, top_k: int = TOP_K):
+    sanity_checks()
+
+    qvec = model.encode(query, normalize_embeddings=True).tolist()
+    print(f"\nQuery: {query}\n")
+
+    try:
+        results = query_once(qvec, top_k)
+    except Exception as e:
+        print(f"gRPC query failed → falling back to HTTP. Reason: {e}")
+        # HTTP'ye düş
+        http_client = QdrantClient(host=QDRANT_HOST, port=HTTP_PORT, prefer_grpc=False, timeout=60.0)
+        global client
+        client = http_client
+        results = query_once(qvec, top_k)
+
+    if not results.points:
+        print("⚠️ Sonuç bulunamadı.")
+        return
+
+    for i, p in enumerate(results.points, start=1):
+        pl = p.payload or {}
+        preview = pl.get("text_preview") or pl.get("karar_preview") or ""
+        if isinstance(preview, list):
+            preview = " ".join(preview)
+        preview = (preview or "").strip().replace("\n", " ")
+        if len(preview) > 180:
+            preview = preview[:180] + "…"
+
+        print(f"{i}. score={p.score:.4f}")
+        print(f"   doc_id:   {pl.get('doc_id', '—')}")
+        print(f"   section:  {pl.get('section', '—')}")
+        print(f"   dava_turu:{pl.get('dava_turu', '—')}")
+        print(f"   sonuc:    {pl.get('sonuc', '—')}")
+        print(f"   esas_no:  {pl.get('metin_esas_no', '—')}")
+        print(f"   karar_no: {pl.get('metin_karar_no', '—')}")
+        print(f"   preview:  {preview}\n")
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print("Kullanım: python search_qdrant.py <query>")
+        print("Kullanım: python src\\retrieval\\search_qdrant.py <sorgu metni>")
         sys.exit(1)
-
     query = " ".join(sys.argv[1:])
     search(query)
+
+
+#python src\retrieval\search_qdrant.py "kira sözleşmesi" 
