@@ -23,7 +23,7 @@ from src.retrieval.retrieve_combined import hybrid_search
 from src.rag.prompt_builder import SYSTEM_PROMPT, build_user_prompt
 from src.rag.validator import validate_answer_json
 from src.llm.engine_ollama import generate_json
-from src.config import DEFAULT_TOPN, MAX_PASSAGE_CHARS
+from src.retrieval.config import DEFAULT_TOPN, MAX_PASSAGE_CHARS
 
 app = FastAPI(title="LexAI Retrieval+LLM API")
 
