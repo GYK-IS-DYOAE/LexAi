@@ -9,7 +9,7 @@ Retriever'dan gelen sonuçlar + kullanıcı sorusunu alır, LLM'e verilecek
 """
 
 from typing import List, Dict
-from src.config import MAX_PASSAGE_CHARS, MAX_TOTAL_PASSAGES
+from src.retrieval.config import MAX_PASSAGE_CHARS, MAX_TOTAL_PASSAGES
 
 SYSTEM_PROMPT = """Sen bir hukuk asistanısın. Sadece TÜRKÇE konuş.
 Aşağıdaki JSON ŞEMASINA UYGUN, SADECE JSON üret. Önsöz/son söz ekleme.
