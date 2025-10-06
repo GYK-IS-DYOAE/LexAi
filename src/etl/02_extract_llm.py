@@ -98,7 +98,6 @@ def build_task(custom_id: str, system_prompt: str, user_text: str, model: str) -
             "model": model,
             "temperature": 0.0,
             "seed": 42,
-            "max_tokens": 3000,
             "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": system_prompt},

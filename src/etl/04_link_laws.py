@@ -1,318 +1,237 @@
-import json
+# -*- coding: utf-8 -*-
+"""
+03_validated.jsonl içindeki "kanun_atiflari" öğelerini,
+yalnızca data/interim/mevzuat_parsed.jsonl kataloğuna bakarak
+kanun numarası ve madde metni ile zenginleştirir.
+
+Giriş:
+- data/interim/mevzuat_parsed.jsonl  (katalog)
+- data/interim/03_validated.jsonl    (validasyon verisi)
+
+Çıkış:
+- data/interim/03_validated.linked.jsonl  (zenginleştirilmiş kayıtlar)
+"""
+
+import io
 import os
 import re
-from typing import Dict, List, Optional, Tuple
+import json
+import argparse
+from typing import Dict, Any, Optional
 
+# -------------------------
+# Yardımcılar
+# -------------------------
+def ensure_dir(path: str) -> None:
+    d = os.path.dirname(os.path.abspath(path))
+    if d and not os.path.exists(d):
+        os.makedirs(d, exist_ok=True)
 
-# Statik bilinen kısaltmalar ve eski kanunlar
-STATIC_ALIASES: Dict[str, Dict[str, str]] = {
-    # HUMK (1086)
-    "HUMK": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
-    "HMUK": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
-    "1086 sayılı HUMK": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
-    "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu": {"canonical": "1086 sayılı Hukuk Usulü Muhakemeleri Kanunu", "law_id": "1086"},
+def read_jsonl(path: str):
+    with io.open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            yield json.loads(line)
 
-    # HMK (6100)
-    "HMK": {"canonical": "6100 sayılı Hukuk Muhakemeleri Kanunu", "law_id": "6100"},
-    "6100 sayılı HMK": {"canonical": "6100 sayılı Hukuk Muhakemeleri Kanunu", "law_id": "6100"},
-    "6100 sayılı Hukuk Muhakemeleri Kanunu": {"canonical": "6100 sayılı Hukuk Muhakemeleri Kanunu", "law_id": "6100"},
+def write_jsonl(path: str, items):
+    ensure_dir(path)
+    with io.open(path, "w", encoding="utf-8") as f:
+        for obj in items:
+            f.write(json.dumps(obj, ensure_ascii=False))
+            f.write("\n")
 
-    # Diğer örnekler
-    "2828 sayılı Sosyal Hizmetler Kanunu": {"canonical": "2828 sayılı Sosyal Hizmetler Kanunu", "law_id": "2828"},
-    "5395 sayılı Çocuk Koruma Kanunu": {"canonical": "5395 sayılı Çocuk Koruma Kanunu", "law_id": "5395"},
-    "4421 sayılı Kanun": {"canonical": "4421 sayılı Kanun", "law_id": "4421"},
+def normalize_text(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip()
+
+# -------------------------
+# Eşleştirme için kısaltma -> kanun_no sözlüğü
+# -------------------------
+ABBR_TO_NO: Dict[str, int] = {
+    "HUMK": 1086, "HMUK": 1086,
+    "HMK": 6100,
+    "TCK": 5237,
+    "CMK": 5271,
+    "TMK": 4721,
+    "TBK": 6098,
+    "TTK": 6102,
+    "IİK": 2004, "İİK": 2004,
+    "IYUK": 2577, "İYUK": 2577,
+    "KVKK": 6698,
+    "KABAHATLER": 5326,
+    "KABAHATLER KANUNU": 5326,
+    "EHK": 5809,
+    "SKDM": 0
 }
 
-# Dinamik olarak mevzuat kataloğundan doldurulacak
-DYNAMIC_ALIASES: Dict[str, Dict[str, str]] = {}
+def norm_abbr(s: str) -> str:
+    s = (s or "").strip()
+    s = s.replace(".", "")
+    s = s.replace("’", "'").replace("‘", "'")
+    s = s.replace("İ", "I")
+    s = s.upper()
+    s = re.sub(r"\s+", " ", s)
+    return s
 
+KANUN_NO_RE = re.compile(r"(\d{3,4})\s*(?:sayılı|sayili)?", re.IGNORECASE)
 
-LAW_NAME_PATTERN = re.compile(
-    r"(?:(?P<law_id>\d{3,4})\s*sayılı\s*)?(?P<name>HUMK|HMUK|HMK|Hukuk\s+Usulü\s+Muhakemeleri\s+Kanunu|Hukuk\s+Muhakemeleri\s+Kanunu|Sosyal\s+Hizmetler\s+Kanunu|Çocuk\s+Koruma\s+Kanunu|\d{3,4}\s*sayılı\s*Kanun)",
-    flags=re.IGNORECASE,
-)
-
-ARTICLE_PATTERN = re.compile(
-    r"madde\s*:?[\s\u00A0]*([0-9]+(?:\/[0-9]+)?(?:-[IVXLC]+|\/[IVXLC]+|\/[A-Za-z0-9\-]+)?)",
-    flags=re.IGNORECASE,
-)
-
-PARAGRAPH_PATTERN = re.compile(
-    r"(?:fıkra|son|\b\/)([0-9IVXLC]+)",
-    flags=re.IGNORECASE,
-)
-
-
-def hydrate_dynamic_aliases() -> None:
-    """Projedeki mevzuat kataloglarından DYNAMIC_ALIASES sözlüğünü doldurur."""
-    global DYNAMIC_ALIASES
-    if DYNAMIC_ALIASES:
-        return
-
-    # 1) mevzuat.json (büyük genel katalog)
-    catalog_paths = [
-        "mevzuat-kanunlar.json",  # öncelik: spesifik kanun listesi
-        "mevzuat.json",  # genel katalog
-        "mevzuat_meta_metadata.json",
-        "cb_bk__kurulu_yonetmelik",
-        "cb_kararname.json",
-        
-    ]
-
-    for path in catalog_paths:
-        if not os.path.exists(path):
-            continue
+def extract_law_no_from_kanun_field(kanun_field: str) -> Optional[int]:
+    if not kanun_field:
+        return None
+    m = KANUN_NO_RE.search(kanun_field)
+    if m:
         try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            return int(m.group(1))
         except Exception:
-            continue
-
-        if isinstance(data, list):
-            for item in data:
-                law_no = str(item.get("mevzuatNo") or item.get("kanunNo") or "").strip()
-                name = (item.get("mevAdi") or item.get("ad") or "").strip()
-                if not name:
-                    continue
-
-                # Kanonik ad
-                canonical = name
-                meta = {"canonical": canonical}
-                if law_no:
-                    meta["law_id"] = law_no
-
-                # 1) Tam ad ile alias
-                DYNAMIC_ALIASES[name] = meta
-
-                # 2) "{no} sayılı {ad}" varyantı
-                if law_no:
-                    variant = f"{law_no} sayılı {name}"
-                    DYNAMIC_ALIASES[variant] = meta
-
-                # 3) Ad içerisinden kısaltma çıkarımı: ör. "HUKUK MUHAKEMELERI KANUNU" -> HMK
-                upper = name.upper()
-                if "HUKUK MUHAKEMELER" in upper and "KANUNU" in upper:
-                    DYNAMIC_ALIASES["HMK"] = meta
-                if ("HUKUK USUL" in upper or "HUKUK USULÜ" in upper) and "MUHAKEMELER" in upper and "KANUNU" in upper:
-                    # Eski HUMK
-                    DYNAMIC_ALIASES["HUMK"] = {"canonical": canonical, "law_id": law_no or "1086"}
-                    DYNAMIC_ALIASES["HMUK"] = {"canonical": canonical, "law_id": law_no or "1086"}
-
-
-def normalize_law_name(raw: str) -> Tuple[str, Optional[str]]:
-    key = raw.strip()
-    # Tam eşleşme
-    if key in STATIC_ALIASES:
-        m = STATIC_ALIASES[key]
-        return m["canonical"], m.get("law_id")
-
-    # Büyük-küçük duyarsız kontrol
-    for alias, meta in STATIC_ALIASES.items():
-        if key.lower() == alias.lower():
-            return meta["canonical"], meta.get("law_id")
-
-    # Dinamik aliaslardan bak
-    if key in DYNAMIC_ALIASES:
-        m = DYNAMIC_ALIASES[key]
-        return m["canonical"], m.get("law_id")
-    for alias, meta in DYNAMIC_ALIASES.items():
-        if key.lower() == alias.lower():
-            return meta["canonical"], meta.get("law_id")
-
-    # Metin içinde geçen ID'yi çekmeyi dene
-    m = re.search(r"(\d{3,4})\s*sayılı", key)
-    law_id = m.group(1) if m else None
-    return key, law_id
-
-
-def build_candidate_urls(canonical_name: str, law_id: Optional[str], article: Optional[str]) -> List[str]:
-    urls: List[str] = []
-    # Resmi bir madde URL şeması sabit değil; güvenli olarak arama URL'leri/pattern üretelim
-    # Kullanıcı kendi tercih ettiği mevzuat sistemiyle değiştirebilir
-    query = canonical_name
-    if article:
-        query += f" madde {article}"
-
-    # mevzuat.gov.tr basit arama sayfası parametresi yok; bilgilendirici amaçlı patternler
-    urls.append(f"mevzuat: {canonical_name}")
-    if article:
-        urls.append(f"mevzuat: {canonical_name} madde {article}")
-    if law_id:
-        urls.append(f"law_id:{law_id}")
-    return urls
-
-
-def scan_text_for_laws(text: str) -> List[Dict[str, Optional[str]]]:
-    links: List[Dict[str, Optional[str]]] = []
-    if not text:
-        return links
-
-    # Hızlı tarama: isim ve maddeleri yakala
-    for match in LAW_NAME_PATTERN.finditer(text):
-        raw_name = match.group(0)
-        canonical, law_id = normalize_law_name(raw_name)
-
-        # Aynı segmentte madde aramayı dene (yaklaşık 50 karakter sonrası)
-        tail = text[match.end(): match.end() + 80]
-        art = None
-        par = None
-        am = ARTICLE_PATTERN.search(tail)
-        if am:
-            art = am.group(1)
-            pm = PARAGRAPH_PATTERN.search(tail)
-            if pm:
-                par = pm.group(1)
-
-        links.append({
-            "law_raw": raw_name,
-            "law_canonical": canonical,
-            "law_id": law_id,
-            "article": art,
-            "paragraph": par,
-            "source": "text_scan",
-            "span": raw_name,
-            "candidate_urls": build_candidate_urls(canonical, law_id, art),
-        })
-    return links
-
-
-def normalize_record_links(record: Dict) -> None:
-    output = record.get("output", {})
-    law_links: List[Dict] = []
-
-    # 1) Var olan kanun_atiflari'ndan normalize et
-    for ref in output.get("kanun_atiflari", []) or []:
-        raw_name = ref.get("kanun") or ""
-        canonical, law_id = normalize_law_name(raw_name)
-        article = ref.get("madde")
-        paragraph = ref.get("fikra")
-        span = ref.get("span")
-
-        link = {
-            "law_raw": raw_name,
-            "law_canonical": canonical,
-            "law_id": law_id,
-            "article": article,
-            "paragraph": paragraph,
-            "source": "kanun_atiflari",
-            "span": span,
-            "candidate_urls": build_candidate_urls(canonical, law_id, article),
-        }
-        law_links.append(link)
-
-    # 2) Metin alanlarını tara: karar, gerekce[], hikaye[] vb.
-    text_fields: List[str] = []
-    if isinstance(output.get("karar"), str):
-        text_fields.append(output["karar"])
-    if isinstance(output.get("gerekce"), list):
-        text_fields.extend([g for g in output["gerekce"] if isinstance(g, str)])
-    if isinstance(output.get("hikaye"), list):
-        text_fields.extend([h for h in output["hikaye"] if isinstance(h, str)])
-
-    for txt in text_fields:
-        for link in scan_text_for_laws(txt):
-            law_links.append(link)
-
-    # 3) Yinelenenleri kaldır (law_canonical + article + paragraph bazında)
-    seen = set()
-    deduped: List[Dict] = []
-    for l in law_links:
-        key = (l.get("law_canonical"), l.get("article"), l.get("paragraph"))
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(l)
-
-    output["law_links"] = deduped
-    record["output"] = output
-
-
-def process_file(input_path: str, output_path: str) -> None:
-    if not os.path.exists(input_path):
-        raise FileNotFoundError(f"Bulunamadı: {input_path}")
-
-    hydrate_dynamic_aliases()
-
-    with open(input_path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    if not isinstance(data, list):
-        raise ValueError("Beklenen format: JSON array")
-
-    for idx, record in enumerate(data, start=1):
-        try:
-            normalize_record_links(record)
-        except Exception:
-            # Kayıt bazında hatayı yut ve devam et
             pass
+    stripped = kanun_field.strip()
+    if stripped.isdigit():
+        return int(stripped)
+    ab = norm_abbr(stripped)
+    if ab in ABBR_TO_NO and ABBR_TO_NO[ab] > 0:
+        return ABBR_TO_NO[ab]
+    nn = rough_expand_to_number(ab)
+    return nn
 
-        if idx % 1000 == 0:
-            print(f"İşlenen kayıt: {idx}")
+def rough_expand_to_number(ab_upper: str) -> Optional[int]:
+    txt = ab_upper
+    if "HUKUK MUHAKEMELERI KANUNU" in txt or "HUKUK MUHAKEMELERİ KANUNU" in txt:
+        return 6100
+    if "HUKUK USULU MUHAKEMELERI KANUNU" in txt or "HUKUK USULÜ MUHAKEMELERİ KANUNU" in txt:
+        return 1086
+    if "TURK CEZA KANUNU" in txt or "TÜRK CEZA KANUNU" in txt:
+        return 5237
+    if "CEZA MUHAKEMESI KANUNU" in txt or "CEZA MUHAKEMESİ KANUNU" in txt:
+        return 5271
+    if "TURK MEDENI KANUNU" in txt or "TÜRK MEDENİ KANUNU" in txt:
+        return 4721
+    if "TURK BORCLAR KANUNU" in txt or "TÜRK BORÇLAR KANUNU" in txt:
+        return 6098
+    if "TURK TICARET KANUNU" in txt or "TÜRK TİCARET KANUNU" in txt:
+        return 6102
+    if "ICRA" in txt and "IFLAS" in txt:
+        return 2004
+    if "IDARI YARGILAMA USULU" in txt or "İDARİ YARGILAMA USULÜ" in txt:
+        return 2577
+    if "KABAHATLER" in txt:
+        return 5326
+    if "ELEKTRONIK HABERLESME" in txt or "ELEKTRONİK HABERLEŞME" in txt:
+        return 5809
+    if "KISIS" in txt and "VERI" in txt:
+        return 6698
+    if "CEZA MUHAKEMELERI USULU KANUNU" in txt or "CEZA MUHAKEMELERİ USULÜ KANUNU" in txt:
+        return 1412
+    return None
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+# -------------------------
+# KataloguOku
+# -------------------------
+def load_catalog(catalog_path: str):
+    by_no: Dict[int, Dict[str, Any]] = {}
+    by_title_lower: Dict[str, int] = {}
+    for law in read_jsonl(catalog_path):
+        no = law.get("kanun_no")
+        if isinstance(no, int):
+            by_no[no] = law
+        title = normalize_text(law.get("kanun_adi", ""))
+        if title:
+            by_title_lower[title.lower()] = no if isinstance(no, int) else None
+    return by_no, by_title_lower
 
-    print(f"Tamamlandı. Çıktı: {output_path}")
+# -------------------------
+# Madde metni çek
+# -------------------------
+def get_article_text(law_obj: Dict[str, Any], madde_str: str) -> Optional[str]:
+    if not law_obj or not madde_str:
+        return None
+    key = str(madde_str).strip()
+    maddeler = law_obj.get("maddeler") or {}
+    if key in maddeler:
+        return normalize_text(maddeler[key])
+    key_digits = re.sub(r"\D+", "", key)
+    if key_digits and key_digits in maddeler:
+        return normalize_text(maddeler[key_digits])
+    gms = law_obj.get("gecici_maddeler") or {}
+    if key in gms:
+        return normalize_text(gms[key])
+    if key_digits and key_digits in gms:
+        return normalize_text(gms[key_digits])
+    return None
 
+# -------------------------
+# GÜNCELLENMİŞ TEK ATIF ZENGİNLEŞTİRME
+# -------------------------
+def enrich_citation(cit: Dict[str, Any], catalog_by_no: Dict[int, Dict[str, Any]], catalog_by_title: Dict[str, int]) -> Dict[str, Any]:
+    kanun_field = cit.get("kanun", "")
+    law_no = extract_law_no_from_kanun_field(kanun_field)
+
+    if law_no is None and kanun_field:
+        k = normalize_text(kanun_field).lower()
+        if k in catalog_by_title and isinstance(catalog_by_title[k], int):
+            law_no = catalog_by_title[k]
+        else:
+            for title_lower, no in catalog_by_title.items():
+                if no is None:
+                    continue
+                if k and k in title_lower:
+                    law_no = no
+                    break
+
+    if law_no is not None and law_no in catalog_by_no:
+        law_obj = catalog_by_no[law_no]
+
+        out = dict(cit)
+        out["law_id"] = str(law_no)
+
+        madde_raw = cit.get("madde")
+        madde_no = str(madde_raw).strip() if madde_raw else None
+
+        if madde_no:
+            # SADECE ilgili maddeyi getir
+            madde_text = get_article_text(law_obj, madde_no)
+            out["law_description"] = {
+                "kanun_adi": law_obj.get("kanun_adi"),
+                "madde": madde_text if madde_text else None
+            }
+        else:
+            # Madde yoksa TÜM maddeleri getir
+            all_articles = law_obj.get("maddeler") or {}
+            enriched_all = {k: normalize_text(v) for k, v in all_articles.items()}
+            out["law_description"] = {
+                "kanun_adi": law_obj.get("kanun_adi"),
+                "maddeler": enriched_all
+            }
+        return out
+
+    return cit
+
+# -------------------------
+# Ana akış
+# -------------------------
+def main():
+    ap = argparse.ArgumentParser(description="03_validated.jsonl içindeki kanun atıflarını mevzuat kataloğu ile zenginleştirir.")
+    ap.add_argument("--catalog", default="data/interim/mevzuat_parsed.jsonl",
+                    help="Mevzuat kataloğu (JSONL)")
+    ap.add_argument("--inp", default="data/interim/03_validated.jsonl",
+                    help="Zenginleştirilecek dosya (JSONL)")
+    ap.add_argument("--out", default="data/interim/03_validated.linked.jsonl",
+                    help="Çıktı (JSONL)")
+    args = ap.parse_args()
+
+    catalog_by_no, catalog_by_title = load_catalog(args.catalog)
+
+    def gen():
+        for rec in read_jsonl(args.inp):
+            if isinstance(rec.get("kanun_atiflari"), list):
+                enriched = [
+                    enrich_citation(cit, catalog_by_no, catalog_by_title)
+                    for cit in rec["kanun_atiflari"]
+                ]
+                rec["kanun_atiflari"] = enriched
+            yield rec
+
+    write_jsonl(args.out, gen())
 
 if __name__ == "__main__":
-    IN_FILE = "02_extract_llm.json"
-    OUT_FILE = "02_extract_llm.linked.json"
-    process_file(IN_FILE, OUT_FILE)
-
-
-def hydrate_dynamic_aliases() -> None:
-    """Projedeki mevzuat kataloglarından DYNAMIC_ALIASES sözlüğünü doldurur."""
-    global DYNAMIC_ALIASES
-    if DYNAMIC_ALIASES:
-        return
-
-    # 1) mevzuat.json (büyük genel katalog)
-    catalog_paths = [
-        "mevzuat-kanunlar.json",  # öncelik: spesifik kanun listesi (varsa)
-        "mevzuat.json",           # genel katalog
-    ]
-
-    for path in catalog_paths:
-        if not os.path.exists(path):
-            continue
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            continue
-
-        if isinstance(data, list):
-            for item in data:
-                law_no = str(item.get("mevzuatNo") or item.get("kanunNo") or "").strip()
-                name = (item.get("mevAdi") or item.get("ad") or "").strip()
-                if not name:
-                    continue
-
-                # Kanonik ad
-                canonical = name
-                meta = {"canonical": canonical}
-                if law_no:
-                    meta["law_id"] = law_no
-
-                # 1) Tam ad ile alias
-                DYNAMIC_ALIASES[name] = meta
-
-                # 2) "{no} sayılı {ad}" varyantı
-                if law_no:
-                    variant = f"{law_no} sayılı {name}"
-                    DYNAMIC_ALIASES[variant] = meta
-
-                # 3) Ad içerisinden kısaltma çıkarımı: ör. "HUKUK MUHAKEMELERI KANUNU" -> HMK
-                upper = name.upper()
-                if "HUKUK MUHAKEMELER" in upper and "KANUNU" in upper:
-                    DYNAMIC_ALIASES["HMK"] = meta
-                if ("HUKUK USUL" in upper or "HUKUK USULÜ" in upper) and "MUHAKEMELER" in upper and "KANUNU" in upper:
-                    # Eski HUMK
-                    DYNAMIC_ALIASES["HUMK"] = {"canonical": canonical, "law_id": law_no or "1086"}
-                    DYNAMIC_ALIASES["HMUK"] = {"canonical": canonical, "law_id": law_no or "1086"}
-
-
-
-
-
+    main()
