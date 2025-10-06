@@ -10,7 +10,7 @@ Ollama üzerinden Qwen 2.5 7B Instruct'a istek atar.
 import json
 import httpx
 from typing import Dict
-from src.config import OLLAMA_HOST, OLLAMA_MODEL
+from src.retrieval.config import OLLAMA_HOST, OLLAMA_MODEL
 
 def generate_json(system_prompt: str, user_prompt: str, temperature: float = 0.2, max_tokens: int = 1024) -> Dict:
     url = f"{OLLAMA_HOST}/api/chat"
