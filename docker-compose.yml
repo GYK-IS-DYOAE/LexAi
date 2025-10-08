@@ -31,6 +31,55 @@ services:
     volumes:
       - os_data:/usr/share/opensearch/data
 
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports: ["11434:11434"]
+    volumes:
+      - ollama_models:/root/.ollama
+    environment:
+      - OLLAMA_NUM_PARALLEL=1
+      - NVIDIA_VISIBLE_DEVICES=all
+    healthcheck:
+      test: ["CMD", "/bin/ollama", "list"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: ["gpu"]
+    entrypoint: ["sh", "-c"]
+    command: >
+      "/bin/ollama serve & 
+      sleep 10 && 
+      /bin/ollama pull qwen2.5:7b-instruct && 
+      tail -f /dev/null"
+      
+  postgres:
+    image: postgres:15
+    restart: unless-stopped
+    container_name: postgres
+    environment:
+      POSTGRES_DB: lexai
+      POSTGRES_USER: lexuser
+      POSTGRES_PASSWORD: lexpass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lexuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   qdrant_data:
   os_data:
+  ollama_models:
+  postgres_data:

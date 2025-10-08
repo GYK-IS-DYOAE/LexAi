@@ -1,28 +1,36 @@
-# src/api/main.py
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
-from typing import List
-from src.retrieval.retrieve_combined import hybrid_search
-from src.rag.prompt_builder import SYSTEM_PROMPT, build_user_prompt
-from src.rag.query_llm import query_llm  # henüz yazacağız
-from src.rag.validator import validate_answer_json
+from fastapi import FastAPI
+from fastapi.openapi.utils import get_openapi
+from src.api.auth.routers import router as auth_router
+from src.api.feedback.routers import router as feedback_router
+from src.api.rag.routers import router as rag_router  # ekledik!
 
 app = FastAPI()
 
-class QueryRequest(BaseModel):
-    query: str
-    topn: int = 8
+app.include_router(auth_router, prefix="/auth")
+app.include_router(feedback_router, prefix="/feedback")
+app.include_router(rag_router)
 
-@app.post("/ask")
-def ask(req: QueryRequest):
+# 🔐 Swagger'da Bearer Auth desteği için:
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    openapi_schema = get_openapi(
+        title="LexAI API",
+        version="1.0.0",
+        description="JWT authenticated API",
+        routes=app.routes,
+    )
+    openapi_schema["components"]["securitySchemes"] = {
+        "BearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT"
+        }
+    }
+    for path in openapi_schema["paths"].values():
+        for method in path.values():
+            method.setdefault("security", []).append({"BearerAuth": []})
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
 
-    hits = hybrid_search(req.query, topn=req.topn)
-    passages = [{"doc_id": h.doc_id, "text": h.text_repr} for h in hits]
-
-    user_prompt = build_user_prompt(req.query, passages)
-
-    answer = query_llm(SYSTEM_PROMPT, user_prompt)
-
-    #validate_answer_json(answer)
-
-    return {"answer": answer}
+app.openapi = custom_openapi

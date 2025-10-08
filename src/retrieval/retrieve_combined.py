@@ -19,7 +19,7 @@ from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 import torch
 
-from src.retrieval.config import (
+from src.rag.config import (
     OS_HOST, OS_PORT, OS_USER, OS_PASS, OS_INDEX,
     QDRANT_HOST, QDRANT_PORT, QDRANT_COLLECTION,
     EMBED_MODEL_NAME,
