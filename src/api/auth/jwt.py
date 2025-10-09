@@ -14,8 +14,10 @@ def create_access_token(data: dict, expires_delta: int = EXPIRE_MINUTES):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
-def decode_access_token(token: str):
+def decode_access_token(token: str) -> dict | None:
     try:
         return jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-    except JWTError:
+    except JWTError as e:
+        print("JWT decode error:", e)  # sadece debug için
         return None
+
