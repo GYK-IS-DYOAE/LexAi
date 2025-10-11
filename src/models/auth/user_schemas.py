@@ -17,7 +17,8 @@ class UserResponse(BaseModel):
     first_name: str
     last_name: str
     email: EmailStr
-    #is_admin: bool  # 👈 eklendi
+    is_admin: bool     
 
     class Config:
         orm_mode = True
+

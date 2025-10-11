@@ -1,25 +1,36 @@
-# src/models/feedback/feedback_schemas.py
+from pydantic import BaseModel
+from typing import Optional
+from uuid import UUID
+from datetime import datetime
+from enum import Enum
 
-from pydantic import BaseModel, Field
-from typing import List, Optional
 
-class VoteRequest(BaseModel):
-    query_id: Optional[str] = None
-    response_id: Optional[str] = None
-    vote: int = Field(..., description="1 for like, -1 for dislike")
-    reason: Optional[str] = None
-    tags: Optional[List[str]] = None
+class VoteType(str, Enum):
+    like = "like"
+    dislike = "dislike"
+
+
+class FeedbackCreate(BaseModel):
+    question_id: Optional[UUID] = None
+    answer_id: UUID
+    question_text: str
+    answer_text: str
+    vote: Optional[VoteType] = None
+    user_id: Optional[UUID] = None
     model: Optional[str] = None
 
-class FeedbackResponse(BaseModel):
-    id: str
-    query_id: Optional[str]
-    response_id: Optional[str]
-    vote: int
-    reason: Optional[str]
-    tags: Optional[List[str]]
-    model: Optional[str]
-    ts: str
 
-    class Config:
-        orm_mode = True
+class FeedbackResponse(BaseModel):
+    id: UUID
+    question_id: Optional[UUID]
+    answer_id: UUID
+    question_text: str
+    answer_text: str
+    vote: Optional[VoteType] = None
+    user_id: Optional[UUID]
+    model: Optional[str]
+    ts: datetime
+
+    model_config = {
+        "from_attributes": True
+    }

@@ -1,19 +1,20 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from typing import Optional
-from .feedback_model import Feedback
-from .feedback_schemas import VoteRequest
+from typing import Optional, List
+from src.models.feedback.feedback_model import Feedback
+from src.models.feedback.feedback_schemas import FeedbackCreate
 
 
-def create_feedback(db: Session, user_id: str, data: VoteRequest) -> Feedback:
+def create_feedback(db: Session, data: FeedbackCreate) -> Feedback:
     """Yeni feedback oluşturur."""
     feedback = Feedback(
-        user_id=user_id,
-        query=data.query,
-        response=data.response,
+        user_id=data.user_id,
+        question_id=data.question_id,
+        answer_id=data.answer_id,
+        question_text=data.question_text,
+        answer_text=data.answer_text,
         vote=data.vote,
-        action=data.action,
-        notes=data.notes
+        model=data.model,
     )
     try:
         db.add(feedback)
@@ -25,7 +26,7 @@ def create_feedback(db: Session, user_id: str, data: VoteRequest) -> Feedback:
         raise RuntimeError(f"Feedback could not be saved: {e}")
 
 
-def get_feedbacks_by_user(db: Session, user_id: str) -> list[Feedback]:
+def get_feedbacks_by_user(db: Session, user_id: str) -> List[Feedback]:
     """Belirli bir kullanıcıya ait tüm feedback kayıtlarını döner."""
     return (
         db.query(Feedback)
@@ -35,7 +36,7 @@ def get_feedbacks_by_user(db: Session, user_id: str) -> list[Feedback]:
     )
 
 
-def get_all_feedbacks(db: Session) -> list[Feedback]:
+def get_all_feedbacks(db: Session) -> List[Feedback]:
     """Admin: tüm feedbackleri döner."""
     return db.query(Feedback).order_by(Feedback.ts.desc()).all()
 
