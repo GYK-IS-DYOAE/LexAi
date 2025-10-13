@@ -1,4 +1,0 @@
-numpy>=1.26
-tqdm>=4.66
-sentence-transformers>=3.0.1
-qdrant-client>=1.9.0

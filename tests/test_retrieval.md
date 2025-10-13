@@ -1,1 +1,0 @@
-Retrieval kalite ölçümü planı.

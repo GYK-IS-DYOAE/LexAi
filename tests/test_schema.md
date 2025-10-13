@@ -1,1 +1,0 @@
-Şema doğrulama planı.
