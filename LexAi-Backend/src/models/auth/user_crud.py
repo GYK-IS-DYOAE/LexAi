@@ -17,7 +17,7 @@ def create_user(
         first_name=first_name,
         last_name=last_name,
         email=email,
-        password_hash=bcrypt.hash(password.encode("utf-8")),
+        password_hash=bcrypt.hash(password),
         is_admin=is_admin 
     )
     db.add(user)

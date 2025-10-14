@@ -24,7 +24,7 @@ class Feedback(Base):
     question_text = Column(String, nullable=False)
     answer_text = Column(String, nullable=False)
 
-    vote = Column(SQLEnum(VoteType, name="vote_type"), nullable=False)
+    vote = Column(SQLEnum(VoteType, name="vote_type"), nullable=True)
 
     model = Column(String, nullable=True)
     ts = Column(DateTime, default=datetime.datetime.utcnow)
