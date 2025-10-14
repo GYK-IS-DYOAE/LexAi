@@ -1,5 +1,13 @@
+<<<<<<< HEAD
 retrieval:
   top_k: 5
   years_back: 5
 scores:
   composite: {text: 0.4, law: 0.3, outcome: 0.2, party: 0.1}
+=======
+retrieval:
+  top_k: 5
+  years_back: 5
+scores:
+  composite: {text: 0.4, law: 0.3, outcome: 0.2, party: 0.1}
+>>>>>>> 4fb0536 (Add LexAi-main files from local deneme123)

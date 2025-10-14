@@ -1,4 +1,11 @@
+<<<<<<< HEAD
 rules:
   nafaka:
     interim: ["tedbir nafakası"]
     note: "Erken başvuru tavsiye edilir; mahkeme takdiri geniştir."
+=======
+rules:
+  nafaka:
+    interim: ["tedbir nafakası"]
+    note: "Erken başvuru tavsiye edilir; mahkeme takdiri geniştir."
+>>>>>>> 4fb0536 (Add LexAi-main files from local deneme123)

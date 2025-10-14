@@ -1,5 +1,13 @@
+<<<<<<< HEAD
 law_id,kanun,madde_no,fikra,status,effective_from,effective_to,aciklama_kisa
 TMK-169,TMK,169,,active,2001-12-08,,Geçici önlemler; barınma/geçim için tedbir.
 TMK-175,TMK,175,,active,2001-12-08,,Yoksulluk nafakası; kusur, ihtiyaç ve ödeme gücü ölçütleri.
 TBK-49,TBK,49,,active,2011-07-01,,Haksız fiil genel hüküm.
 HMK-361,HMK,361,,active,2011-10-01,,Temyiz edilebilirlik ve sınırlar.
+=======
+law_id,kanun,madde_no,fikra,status,effective_from,effective_to,aciklama_kisa
+TMK-169,TMK,169,,active,2001-12-08,,Geçici önlemler; barınma/geçim için tedbir.
+TMK-175,TMK,175,,active,2001-12-08,,Yoksulluk nafakası; kusur, ihtiyaç ve ödeme gücü ölçütleri.
+TBK-49,TBK,49,,active,2011-07-01,,Haksız fiil genel hüküm.
+HMK-361,HMK,361,,active,2011-10-01,,Temyiz edilebilirlik ve sınırlar.
+>>>>>>> 4fb0536 (Add LexAi-main files from local deneme123)

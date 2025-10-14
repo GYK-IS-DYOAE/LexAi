@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 matrix:
   nafaka:
     zorunlu: ["gelir belgesi","gider dökümü"]
@@ -9,3 +10,16 @@ matrix:
     guclendirici: ["fotoğraf","video","fiş/fatura"]
     opsiyonel: ["yazışmalar"]
     etkiler: {"tanık beyanı": 7, "fotoğraf": 4}
+=======
+matrix:
+  nafaka:
+    zorunlu: ["gelir belgesi","gider dökümü"]
+    guclendirici: ["kira kontratı","faturalar","sağlık raporu"]
+    opsiyonel: ["tanık beyanı"]
+    etkiler: {"gelir belgesi": 8, "gider dökümü": 6, "kira kontratı": 4}
+  ziynet:
+    zorunlu: ["düğün takılarına ilişkin delil","tanık beyanı"]
+    guclendirici: ["fotoğraf","video","fiş/fatura"]
+    opsiyonel: ["yazışmalar"]
+    etkiler: {"tanık beyanı": 7, "fotoğraf": 4}
+>>>>>>> 4fb0536 (Add LexAi-main files from local deneme123)

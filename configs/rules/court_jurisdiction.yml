@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 rules:
   aile:
     court: "Aile Mahkemesi"
@@ -5,3 +6,12 @@ rules:
   borclar:
     court: "Asliye Hukuk Mahkemesi"
     note: "Genel görevli mahkeme."
+=======
+rules:
+  aile:
+    court: "Aile Mahkemesi"
+    note: "Yetki çoğunlukla taraflardan birinin yerleşim yeri."
+  borclar:
+    court: "Asliye Hukuk Mahkemesi"
+    note: "Genel görevli mahkeme."
+>>>>>>> 4fb0536 (Add LexAi-main files from local deneme123)
