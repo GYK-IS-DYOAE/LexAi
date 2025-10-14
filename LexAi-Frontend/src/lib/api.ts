@@ -8,11 +8,20 @@ const api = axios.create({
   },
 });
 
-// Token varsa otomatik ekle
+// 🔹 Token varsa otomatik ekle (hiç hata fırlatmaz)
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  try {
+    // Zustand persist edilen token'ı oku
+    const stored = localStorage.getItem("auth-storage");
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      const token = parsed?.state?.token;
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+  } catch (err) {
+    console.warn("Token eklenemedi:", err);
   }
   return config;
 });

@@ -65,3 +65,50 @@
     @apply bg-gradient-to-r from-[hsl(var(--lex-primary-grad1))] to-[hsl(var(--lex-primary-grad2))] bg-clip-text text-transparent;
   }
 }
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.5);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  overflow-x: auto !important; /* yatay scroll'a zorla izin ver */
+  overflow-y: auto;
+}
+
+/* sadece gerektiğinde çıkan yatay scroll */
+.hide-scrollbar {
+  scrollbar-gutter: stable both-edges; /* kayma engelleme */
+}
+.hide-scrollbar::-webkit-scrollbar {
+  height: 6px;
+}
+.hide-scrollbar::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 9999px;
+}
+.hide-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+@media (min-width: 1600px) {
+  .hide-scrollbar::-webkit-scrollbar {
+    display: none; /* ekran büyükse tamamen gizle */
+  }
+}
+
+
