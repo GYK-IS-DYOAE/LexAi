@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from src.core.db import SessionLocal
+from src.core.deps import get_db
 from src.api.auth.security import get_current_user
 from src.models.auth.user_model import User
 from src.models.feedback.feedback_schemas import FeedbackResponse
@@ -16,21 +17,13 @@ router = APIRouter(
 )
 
 
-# ✅ DB bağlantısı
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
-
-# 🧩 Vote body modeli
+# Vote body modeli
 class VoteRequest(BaseModel):
     vote: str  # "like" veya "dislike"
 
 
-# ✅ Kullanıcı cevaba oy verir (body üzerinden)
+# Kullanıcı cevaba oy verir (body üzerinden)
 @router.patch(
     "/{feedback_id}/vote",
     summary="Vote for feedback",
@@ -102,7 +95,7 @@ def list_all_feedbacks(
     return feedback_crud.get_all_feedbacks(db)
 
 
-# ✅ Feedback ID'ye göre getir (herkes erişebilir)
+# Feedback ID'ye göre getir (herkes erişebilir)
 @router.get(
     "/{feedback_id}",
     response_model=FeedbackResponse,

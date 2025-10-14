@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-# Ortam değişkeninden veritabanı URL'sini al
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # SQLAlchemy engine
