@@ -13,7 +13,7 @@ router = APIRouter(
 @router.post("/analyze", response_model=SimilarResponse, summary="Find similar cases and related laws")
 def analyze_similar_cases(
     request: SimilarRequest,
-    user: User = Depends(get_current_user)  # token doğrulama
+    user: User = Depends(get_current_user)  
 ):
     """
     Kullanıcının metnine göre hibrit arama yapar ve

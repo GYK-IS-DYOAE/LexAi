@@ -4,22 +4,16 @@ from sqlalchemy.orm import Session
 from jose import JWTError, jwt
 
 from src.core.db import SessionLocal
+from src.core.deps import get_db
 from src.models.auth.user_model import User
 from src.api.auth.jwt import SECRET_KEY, ALGORITHM, decode_access_token
 
-# ⚠️ En kritik satır — baştaki "/" OLMAYACAK!
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
 
 
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    print("Received token >>>", token[:30])  # 🔍 Debug için, token gerçekten geliyor mu göreceğiz
+    print("Received token >>>", token[:30])  
 
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
