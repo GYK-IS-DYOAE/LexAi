@@ -2,6 +2,9 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from src.api.conversation.routers import router as conversation_router
+
+
 
 from src.api.auth.routers import router as auth_router
 from src.api.feedback.routers import router as feedback_router
@@ -29,6 +32,7 @@ app.include_router(auth_router)
 app.include_router(feedback_router)
 app.include_router(rag_router)
 app.include_router(similar_router)
+app.include_router(conversation_router)
 
 # ✅ Custom OpenAPI (Swagger için JWT butonu)
 def custom_openapi():
