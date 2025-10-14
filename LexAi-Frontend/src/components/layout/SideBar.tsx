@@ -38,6 +38,7 @@ export default function SideBar() {
   }, []);
 
   const location = useLocation();
+
   const isAdmin = !!user?.is_admin;
   const onAdminPage = /^\/admin(?:\/|$)/.test(location.pathname);
 
@@ -74,51 +75,15 @@ export default function SideBar() {
     }
   };
 
-  // ✅ Yeni sohbet başlatma — ortada bile tıklansa çalışır
+  // ✅ Yeni Sohbet butonuna tıklanınca flag oluştur
   const handleNewChatClick = () => {
-    try {
-      const messages = JSON.parse(
-        sessionStorage.getItem("lexai_current_messages") || "[]"
-      );
-
-      // Eğer mevcut sohbette mesaj varsa önce kaydet
-      if (messages.length > 0) {
-        const fullChats =
-          JSON.parse(localStorage.getItem("chat_history_full") || "[]") || [];
-        const title =
-          (messages[0]?.content || "Yeni sohbet")
-            .trim()
-            .split(/\s+/)
-            .slice(0, 3)
-            .join(" ") + "...";
-        const newChat = {
-          id: Date.now(),
-          title,
-          messages,
-        };
-        const updatedAll = [...fullChats, newChat];
-        localStorage.setItem("chat_history_full", JSON.stringify(updatedAll));
-
-        const shortList = updatedAll.map((c) => ({
-          id: c.id,
-          title: c.title,
-        }));
-        localStorage.setItem("chat_history", JSON.stringify(shortList));
-      }
-    } catch (err) {
-      console.error("Sohbet kaydedilirken hata:", err);
-    }
-
-    // ✅ Yeni sohbet başlat
-    const newId = Date.now();
-    window.history.pushState(null, "", `/chat?id=${newId}`);
-    window.location.reload(); // 💥 garantili yeniden yükleme
+    localStorage.setItem("lexai_new_chat", "1");
   };
 
   const userMenu = [
     {
       name: "Yeni Sohbet",
-      path: "#",
+      path: "/chat",
       icon: MessageSquare,
       onClick: handleNewChatClick,
     },
@@ -167,16 +132,11 @@ export default function SideBar() {
       <nav className="py-4 flex-none">
         <ul className="space-y-1">
           {primaryItems.map(({ name, path, icon: Icon, onClick }) => (
-            <li key={name} className="px-2">
+            <li key={path} className="px-2">
               <NavLink
-                to={path === "#" ? "#" : path}
+                to={path}
                 end={path === "/admin"}
-                onClick={(e) => {
-                  if (onClick) {
-                    e.preventDefault();
-                    onClick();
-                  }
-                }}
+                onClick={onClick}
                 className={({ isActive }) =>
                   `flex h-10 items-center ${
                     collapsed ? "justify-center" : "gap-3 px-3"
@@ -196,7 +156,7 @@ export default function SideBar() {
         </ul>
       </nav>
 
-      {/* ✅ Geçmiş Sohbetler (scrollable) */}
+      {/* ✅ Geçmiş Sohbetler */}
       {!collapsed && !onAdminPage && (
         <div className="px-3 mt-3 flex flex-col flex-1 overflow-hidden">
           <div className="flex items-center gap-2 px-2 py-1.5 flex-none">
@@ -206,7 +166,7 @@ export default function SideBar() {
             </span>
           </div>
 
-          {/* 🔽 Kaydırılabilir geçmiş listesi */}
+          {/* 🔽 Sohbet listesi kaydırılabilir alan */}
           <div
             className="flex-1 overflow-y-auto pr-1 mt-2 space-y-1
                        scrollbar-thin scrollbar-thumb-[hsl(var(--muted-foreground))/0.3]
