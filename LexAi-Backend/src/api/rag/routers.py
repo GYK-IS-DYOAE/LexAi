@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from src.api.auth.security import get_current_user
-#from src.core.deps import get_db            # ✅ tek kaynaktan get_db
+from src.core.deps import get_db            
 from src.models.auth.user_model import User
 from src.rag.prompt_builder import SYSTEM_PROMPT, build_user_prompt
 from src.rag.query_llm import query_llm

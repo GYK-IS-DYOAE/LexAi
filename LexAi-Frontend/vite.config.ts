@@ -1,10 +1,10 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import tsconfigPaths from "vite-tsconfig-paths"; // ✅ EKLENECEK
+import tsconfigPaths from "vite-tsconfig-paths"; 
 
 export default defineConfig({
   plugins: [
     react(),
-    tsconfigPaths(), // ✅ EKLENECEK
+    tsconfigPaths(),
   ],
 });
