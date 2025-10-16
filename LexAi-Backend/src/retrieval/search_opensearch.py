@@ -1,26 +1,19 @@
 # src/retrieval/search_opensearch.py
-# ==========================================================
-# OpenSearch içinde BM25 tabanlı arama yapar
-# ==========================================================
-
 import sys
 from opensearchpy import OpenSearch
 
-# ============================== Config ==============================
 INDEX_NAME = "lexai_cases"
 OPENSEARCH_HOST = "localhost"
 OPENSEARCH_PORT = 9200
 
-# ============================== Connect ==============================
 client = OpenSearch(
     hosts=[{"host": OPENSEARCH_HOST, "port": OPENSEARCH_PORT}],
-    scheme="http",        # ✅ çünkü security kapalı
-    use_ssl=False,        # ✅ çünkü TLS yok
+    scheme="http",        
+    use_ssl=False,        
     verify_certs=False,
     ssl_show_warn=False
 )
 
-# ============================== Search ==============================
 def search(query):
     body = {
         "size": 5,
@@ -37,7 +30,6 @@ def search(query):
     results = client.search(index=INDEX_NAME, body=body)
     return results
 
-# ============================== CLI ==============================
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: python search_opensearch.py '<query>'")

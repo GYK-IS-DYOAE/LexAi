@@ -101,3 +101,13 @@ def delete_session(db: Session, session_id: UUID, user_id: UUID):
         return True
 
     return False
+
+
+def get_sessions_by_user(db: Session, user_id: str):
+    """Kullanıcının tüm oturumlarını döner (en son oluşturulan en üstte)."""
+    return (
+        db.query(ConversationSession)
+        .filter(ConversationSession.user_id == user_id)
+        .order_by(ConversationSession.created_at.desc())
+        .all()
+    )

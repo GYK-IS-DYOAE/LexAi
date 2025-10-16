@@ -22,7 +22,6 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
-# ================== Config ==================
 INPUT_FILE = "data/interim/balanced_total30k.jsonl"
 
 OUT_DIR = Path("data/processed/embeddings")
@@ -264,7 +263,7 @@ def main():
     ensure_collection(client, vector_size, state)
     next_line = state.get("next_line", 0)
     chunk_idx = state.get("chunk_idx", 0)
-    print(f"▶ Resuming from line {next_line}, chunk {chunk_idx}")
+    print(f"Resuming from line {next_line}, chunk {chunk_idx}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 

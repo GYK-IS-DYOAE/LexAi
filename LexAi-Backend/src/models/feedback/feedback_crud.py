@@ -1,11 +1,10 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import cast, String
 from typing import Optional, List
+from uuid import UUID
 from src.models.feedback.feedback_model import Feedback
 from src.models.feedback.feedback_schemas import FeedbackCreate
 from src.models.auth.user_model import User
-from uuid import UUID
 
 
 def create_feedback(db: Session, data: FeedbackCreate) -> Feedback:
@@ -39,14 +38,11 @@ def get_feedbacks_by_user(db: Session, user_id: str) -> List[Feedback]:
     )
 
 
-
 def get_all_feedbacks(db: Session):
     """Admin paneli için tüm feedback kayıtlarını kullanıcı bilgileriyle birlikte döner."""
     feedbacks = db.query(Feedback).order_by(Feedback.ts.desc()).all()
-
-    # Tüm kullanıcıları tek seferde çek
     users = db.query(User).all()
-    # UUID -> user eşleşmesi (hem UUID hem string key olarak)
+
     user_map = {}
     for u in users:
         try:
@@ -82,6 +78,7 @@ def get_all_feedbacks(db: Session):
 
     return result
 
+
 def get_feedback_by_id(db: Session, feedback_id: str) -> Optional[Feedback]:
     """ID'ye göre tek bir feedback döner."""
     return db.query(Feedback).filter(Feedback.id == feedback_id).first()
@@ -95,3 +92,16 @@ def delete_feedback(db: Session, feedback_id: str) -> bool:
     db.delete(feedback)
     db.commit()
     return True
+
+
+def get_feedback_by_message_id(db: Session, message_id: str) -> Optional[Feedback]:
+    """Belirli bir message_id (question_id veya answer_id) için feedback kaydını döner."""
+    return (
+        db.query(Feedback)
+        .filter(
+            (Feedback.question_id == message_id) |
+            (Feedback.answer_id == message_id)
+        )
+        .order_by(Feedback.ts.desc())
+        .first()
+    )

@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 from uuid import UUID
 from pydantic import BaseModel
 
-from src.core.db import SessionLocal
 from src.core.deps import get_db
 from src.api.auth.security import get_current_user
 from src.models.auth.user_model import User
@@ -17,13 +16,10 @@ router = APIRouter(
 )
 
 
-
-# Vote body modeli
 class VoteRequest(BaseModel):
     vote: str  # "like" veya "dislike"
 
 
-# Kullanıcı cevaba oy verir (body üzerinden)
 @router.patch(
     "/{feedback_id}/vote",
     summary="Vote for feedback",
@@ -31,45 +27,42 @@ class VoteRequest(BaseModel):
 )
 def vote_feedback(
     feedback_id: UUID,
-    data: VoteRequest,  # 👈 Body'den JSON olarak alıyoruz
+    data: VoteRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     feedback = feedback_crud.get_feedback_by_id(db, feedback_id)
     if not feedback:
         raise HTTPException(status_code=404, detail="Feedback not found")
 
-    # 👇 Yalnızca o feedback’in sahibi oy verebilir
     if feedback.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can only vote for your own feedbacks")
 
-    # 👇 Oy kontrolü
     if data.vote not in ["like", "dislike"]:
         raise HTTPException(status_code=400, detail="Vote must be 'like' or 'dislike'")
 
-    # 👇 Veritabanında güncelle
     feedback.vote = data.vote
     db.commit()
     db.refresh(feedback)
 
     return {
-        "detail": f"Vote updated to '{data.vote}'",
         "feedback_id": str(feedback.id),
-        "vote": feedback.vote
+        "vote": feedback.vote,
+        "detail": f"Vote updated to '{data.vote}'",
     }
+
 
 @router.get(
     "/user/{user_id}",
     response_model=list[FeedbackResponse],
     summary="List feedbacks by user (Admin only)",
-    description="Sadece admin kullanıcılar, belirli bir kullanıcıya ait feedback'leri görebilir."
+    description="Sadece admin kullanıcılar, belirli bir kullanıcıya ait feedback'leri görebilir.",
 )
 def list_feedbacks_by_user(
     user_id: UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
- 
     if not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Admin access required")
 
@@ -88,14 +81,14 @@ def list_feedbacks_by_user(
 )
 def list_all_feedbacks(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
     if not getattr(current_user, "is_admin", False):
         raise HTTPException(status_code=403, detail="Admin access required")
+
     return feedback_crud.get_all_feedbacks(db)
 
 
-# Feedback ID'ye göre getir (herkes erişebilir)
 @router.get(
     "/{feedback_id}",
     response_model=FeedbackResponse,
@@ -104,7 +97,7 @@ def list_all_feedbacks(
 )
 def get_feedback_by_id(
     feedback_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     feedback = feedback_crud.get_feedback_by_id(db, feedback_id)
     if not feedback:

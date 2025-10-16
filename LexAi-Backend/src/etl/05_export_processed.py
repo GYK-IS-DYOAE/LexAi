@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-
 """
 Uçtan uca ETL orchestrator (in-process, runpy).
 Sıra:
@@ -31,13 +28,6 @@ EXTRACT_JSONL        = INTERIM / "02_extract_llm.jsonl"
 
 MISSING_IDS_TXT      = DEBUGDIR / "missing_ids.txt"
 
-# validate_normalize.py kendi içinde sabit kullanıyor:
-# INPUT:  data/interim/02_extract_llm_parsed.json
-# OUTPUT: data/interim/03_validated.jsonl
-
-# link_laws.py kendi içinde sabit kullanıyor:
-# IN_FILE = "02_extract_llm.json"
-# OUT_FILE = "02_extract_llm.linked.json"
 
 @contextlib.contextmanager
 def temp_argv(argv):
@@ -139,13 +129,13 @@ def step_extract_resume(seg_out: Path, *, batch_id: str | None = None,
 
 def step_validate_normalize():
     py = SRC_ETL / "03_validate_normalize.py"
-    argv = [str(py)]  # script kendi sabit yollarını kullanıyor
+    argv = [str(py)]  
     print("[run] 03_validate_normalize (args yok)")
     run_script(py, argv)
 
 def step_link_laws():
     py = SRC_ETL / "04_link_laws.py"
-    argv = [str(py)]  # script kendi sabit yollarını kullanıyor
+    argv = [str(py)]  
     print("[run] 04_link_laws (args yok)")
     run_script(py, argv)
 

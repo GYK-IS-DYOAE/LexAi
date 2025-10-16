@@ -1,6 +1,6 @@
 import api from "@/lib/api";
 
-// 🔹 LOGIN
+// LOGIN
 export async function loginUser(email: string, password: string) {
   const formData = new URLSearchParams();
   formData.append("username", email); // backend username=email bekliyor
@@ -12,7 +12,7 @@ export async function loginUser(email: string, password: string) {
   return res.data; // { access_token, token_type }
 }
 
-// 🔹 REGISTER
+// REGISTER
 export async function registerUser(firstName: string, lastName: string, email: string, password: string) {
   const res = await api.post("/auth/register", {
     first_name: firstName,
@@ -23,7 +23,7 @@ export async function registerUser(firstName: string, lastName: string, email: s
   return res.data; // user objesi
 }
 
-// 🔹 ME
+// ME
 export async function getCurrentUser() {
   const res = await api.get("/auth/me");
   return res.data;

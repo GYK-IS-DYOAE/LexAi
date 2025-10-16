@@ -19,9 +19,7 @@ import json
 import argparse
 from typing import Dict, Any, Optional
 
-# -------------------------
-# Yardımcılar
-# -------------------------
+
 def ensure_dir(path: str) -> None:
     d = os.path.dirname(os.path.abspath(path))
     if d and not os.path.exists(d):
@@ -45,9 +43,6 @@ def write_jsonl(path: str, items):
 def normalize_text(s: str) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
-# -------------------------
-# Eşleştirme için kısaltma -> kanun_no sözlüğü
-# -------------------------
 ABBR_TO_NO: Dict[str, int] = {
     "HUMK": 1086, "HMUK": 1086,
     "HMK": 6100,
@@ -124,9 +119,6 @@ def rough_expand_to_number(ab_upper: str) -> Optional[int]:
         return 1412
     return None
 
-# -------------------------
-# KataloguOku
-# -------------------------
 def load_catalog(catalog_path: str):
     by_no: Dict[int, Dict[str, Any]] = {}
     by_title_lower: Dict[str, int] = {}
@@ -139,9 +131,6 @@ def load_catalog(catalog_path: str):
             by_title_lower[title.lower()] = no if isinstance(no, int) else None
     return by_no, by_title_lower
 
-# -------------------------
-# Madde metni çek
-# -------------------------
 def get_article_text(law_obj: Dict[str, Any], madde_str: str) -> Optional[str]:
     if not law_obj or not madde_str:
         return None
@@ -159,9 +148,6 @@ def get_article_text(law_obj: Dict[str, Any], madde_str: str) -> Optional[str]:
         return normalize_text(gms[key_digits])
     return None
 
-# -------------------------
-# GÜNCELLENMİŞ TEK ATIF ZENGİNLEŞTİRME
-# -------------------------
 def enrich_citation(cit: Dict[str, Any], catalog_by_no: Dict[int, Dict[str, Any]], catalog_by_title: Dict[str, int]) -> Dict[str, Any]:
     kanun_field = cit.get("kanun", "")
     law_no = extract_law_no_from_kanun_field(kanun_field)
@@ -206,9 +192,6 @@ def enrich_citation(cit: Dict[str, Any], catalog_by_no: Dict[int, Dict[str, Any]
 
     return cit
 
-# -------------------------
-# Ana akış
-# -------------------------
 def main():
     ap = argparse.ArgumentParser(description="03_validated.jsonl içindeki kanun atıflarını mevzuat kataloğu ile zenginleştirir.")
     ap.add_argument("--catalog", default="data/interim/mevzuat_parsed.jsonl",

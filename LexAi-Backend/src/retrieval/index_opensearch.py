@@ -1,14 +1,9 @@
 # src/retrieval/index_opensearch.py
-# ==========================================================
-# Karar verilerini OpenSearch'e indeksleme (BM25 keyword arama için)
-# ==========================================================
-
 import json
 from opensearchpy import OpenSearch, helpers
 from tqdm import tqdm
 from pathlib import Path
 
-# ============================== Config ==============================
 INPUT_FILE = "data/interim/balanced_total30k.jsonl"
 INDEX_NAME = "lexai_cases"
 
@@ -18,7 +13,6 @@ OPENSEARCH_PORT = 9200
 BATCH_SIZE = 500  # önerilen
 VERIFY_CERTS = False
 
-# ============================== Connect ==============================
 client = OpenSearch(
     hosts=[{"host": OPENSEARCH_HOST, "port": OPENSEARCH_PORT}],
     scheme="http",            # ✅ HTTP çünkü security kapalı
@@ -29,7 +23,6 @@ client = OpenSearch(
     timeout=60
 )
 
-# ============================== Index Reset ==============================
 if client.indices.exists(index=INDEX_NAME):
     print(f"⚠️  Index '{INDEX_NAME}' already exists → deleting...")
     client.indices.delete(index=INDEX_NAME)
@@ -70,7 +63,6 @@ settings = {
 client.indices.create(index=INDEX_NAME, body=settings)
 print(f"✅ Created index '{INDEX_NAME}'")
 
-# ============================== Load & Bulk Insert ==============================
 docs_path = Path(INPUT_FILE)
 if not docs_path.exists():
     raise FileNotFoundError(f"Girdi dosyası bulunamadı: {INPUT_FILE}")
@@ -84,7 +76,7 @@ with open(INPUT_FILE, "r", encoding="utf-8") as f:
         _id = str(rec.get("doc_id") or f"auto_{i}")
         docs.append({"_id": _id, "_source": rec})
 
-print(f"✅ Loaded {len(docs)} docs for test insert")
+print(f"Loaded {len(docs)} docs for test insert")
 
 def gendata():
     for d in docs:
@@ -94,10 +86,10 @@ def gendata():
             "_source": d["_source"]
         }
 
-print("⚙️  Bulk inserting...")
+print("Bulk inserting...")
 helpers.bulk(client, gendata(), chunk_size=BATCH_SIZE, request_timeout=120)
-print("🎉 Test data inserted into OpenSearch successfully!")
+print("Test data inserted into OpenSearch successfully!")
 
 # ============================== Sanity Check ==============================
 count = client.count(index=INDEX_NAME)["count"]
-print(f"📊 Indexed documents: {count}")
+print(f"Indexed documents: {count}")

@@ -28,17 +28,11 @@ import re
 from pathlib import Path
 from datetime import datetime
 
-# ==============================
-# Config
-# ==============================
 INPUT_PATH   = Path("data/interim/02_extract_llm.jsonl")
 OUTPUT_PATH  = Path("data/interim/03_validated.jsonl")
 REPORT_PATH  = Path("data/interim/validate.json")
 SAMPLE_OUTPUT_PATH = Path("data/interim/sample_ft_dava_turu.jsonl")
 
-# ==============================
-# Helpers
-# ==============================
 DATE_FORMATS = (
     "%Y-%m-%d", "%d.%m.%Y", "%d/%m/%Y",
     "%d-%m-%Y", "%Y/%m/%d", "%d %m %Y",
@@ -152,9 +146,8 @@ def normalize_basvuru_yolu(raw) -> list:
     if not out:
         out = ["yok"]
     return uniq_list(out)
-# ==============================
-# Main
-# ==============================
+
+
 def main():
     if not INPUT_PATH.exists():
         print(f"Girdi dosyası bulunamadı: {INPUT_PATH}")
@@ -203,7 +196,7 @@ def main():
             content = item.get("output") or {}
             quality_flags = []
 
-            # -------------- dava_turu --------------
+            #dava_turu
             raw_case_type = ensure_str(content.get("dava_turu"))
             if isinstance(raw_case_type, str):
                 cleaned_case_type = normalize_whitespace(
@@ -213,19 +206,19 @@ def main():
                 cleaned_case_type = ""
             content["dava_turu"] = cleaned_case_type
 
-            # -------------- taraf_iliskisi --------------
+            #taraf_iliskisi
             taraf_iliskisi = normalize_whitespace(ensure_str(content.get("taraf_iliskisi")))
             if not taraf_iliskisi:
                 stats["empty_to_defaults"] += 1
             content["taraf_iliskisi"] = taraf_iliskisi
 
-            # -------------- sonuc --------------
+            #sonuc
             content["sonuc"] = normalize_sonuc(content.get("sonuc"))
 
-            # -------------- karar --------------
+            #karar
             content["karar"] = normalize_whitespace(ensure_str(content.get("karar")))
 
-            # -------------- gerekce (list<string>) --------------
+            #gerekce (list<string>)
             gerekce = content.get("gerekce")
             if not isinstance(gerekce, list):
                 gerekce = [] if gerekce in (None, "") else [ensure_str(gerekce)]
@@ -237,7 +230,7 @@ def main():
             ]
             content["gerekce"] = gerekce
 
-            # -------------- hikaye (list<string>) --------------
+            #hikaye (list<string>)
             hikaye = content.get("hikaye")
             if not isinstance(hikaye, list):
                 hikaye = [] if hikaye in (None, "") else [ensure_str(hikaye)]
@@ -249,7 +242,7 @@ def main():
             ]
             content["hikaye"] = hikaye
 
-            # -------------- deliller / talepler / gecici_tedbirler --------------
+            #deliller / talepler / gecici_tedbirler
             for k in ["deliller", "talepler", "gecici_tedbirler"]:
                 v = content.get(k)
                 if not isinstance(v, list):
@@ -262,10 +255,10 @@ def main():
                 ]
                 content[k] = v
 
-            # -------------- basvuru_yolu --------------
+            #basvuru_yolu
             content["basvuru_yolu"] = normalize_basvuru_yolu(content.get("basvuru_yolu"))
 
-            # -------------- metin_esas_no / metin_karar_no --------------
+            #metin_esas_no / metin_karar_no
             for k in ["metin_esas_no", "metin_karar_no"]:
                 v = content.get(k)
                 if not isinstance(v, list):
@@ -279,7 +272,7 @@ def main():
                 v = uniq_list(v)
                 content[k] = v
 
-            # -------------- kanun_atiflari --------------
+            #kanun_atiflari
             ka = content.get("kanun_atiflari")
             if not isinstance(ka, list):
                 ka = [] if ka in (None, "") else [ka]
@@ -303,7 +296,7 @@ def main():
                 fixed_ka.append(obj)
             content["kanun_atiflari"] = fixed_ka
 
-            # -------------- onemli_tarihler --------------
+            #onemli_tarihler
             ot = content.get("onemli_tarihler")
             if not isinstance(ot, list):
                 ot = [] if ot in (None, "") else [ot]
@@ -332,7 +325,8 @@ def main():
                 obj["span"] = normalize_whitespace(ensure_str(obj.get("span")))
                 fixed_ot.append(obj)
             content["onemli_tarihler"] = fixed_ot
-            # -------------- adimlar --------------
+
+            #adimlar
             steps = content.get("adimlar")
             if not isinstance(steps, list):
                 steps = [] if steps in (None, "") else [steps]
@@ -366,7 +360,6 @@ def main():
                 fixed_steps.append(s)
             content["adimlar"] = fixed_steps
 
-            # kalite bayrakları
             if any(isinstance(a, dict) and not a.get("spans") for a in content.get("adimlar", [])):
                 quality_flags.append("steps_dropped")
             if len(content.get("adimlar", [])) < 3:
@@ -384,8 +377,7 @@ def main():
             for fl in set(quality_flags):
                 flags_counter[fl] = flags_counter.get(fl, 0) + 1
 
-            # 🔥 ESKİ: {"id","record": {...}, "quality_flags": [...]}
-            # ✅ YENİ: Flatten edilmiş satır + id alanlarını ekleyip direkt yaz
+            #Flatten edilmiş satır + id alanlarını ekleyip direkt yaz
             flat_output = {
                 "doc_id": ensure_str(_id),
                 **content,
@@ -406,7 +398,7 @@ def main():
     with REPORT_PATH.open("w", encoding="utf-8") as f:
         f.write(json.dumps(report, ensure_ascii=False, indent=2))
 
-    print("✅ Tamamlandı:")
+    print("Tamamlandı:")
     print(f"  • {OUTPUT_PATH}")
     print(f"  • {REPORT_PATH}")
 

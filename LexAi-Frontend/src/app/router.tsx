@@ -37,7 +37,7 @@ export const router = createBrowserRouter([
       { path: "/chat", element: <ChatPage /> },
       { path: "/similar", element: <SimilarCasesPage /> },
 
-      // 🧩 Admin routes
+      //Admin routes
       {
         path: "/admin",
         element: (

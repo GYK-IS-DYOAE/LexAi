@@ -30,10 +30,7 @@ class FeedbackResponse(BaseModel):
     user_id: Optional[UUID]
     model: Optional[str]
     ts: datetime
-
     user_email: Optional[str] = None
     user_name: Optional[str] = None
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
