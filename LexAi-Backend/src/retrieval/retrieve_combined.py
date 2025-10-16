@@ -46,8 +46,8 @@ def _build_opensearch() -> OpenSearch:
     # Security kapalı olduğu için auth yok.
     kwargs = dict(
         hosts=[{"host": OS_HOST, "port": OS_PORT}],
-        scheme="http",         # ✅ HTTP
-        use_ssl=False,         # ✅ TLS yok
+        scheme="http",         #  HTTP
+        use_ssl=False,         #  TLS yok
         verify_certs=False,
         ssl_show_warn=False,
     )
