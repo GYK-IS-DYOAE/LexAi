@@ -24,7 +24,7 @@ QDRANT_COLLECTION = "lexai_cases"
 # ======================================
 # ✨ Embedding Model (Retrieval için)
 # ======================================
-EMBED_MODEL_NAME = "BAAI/bge-m3"   # Sentence embedding modeli
+EMBED_MODEL_NAME = "KocLab-Bilkent/BERTurk-Legal"   # Sentence embedding modeli
 
 # ======================================
 # 🧾 Prompt & Cevap Ayarları
