@@ -100,8 +100,6 @@ def clean_page_text(txt: str, common_heads: set, common_foots: set) -> str:
     out = strip_inline_footnote_markers(out)
     return normalize_spaces(out)
 
-# -------- PDF / OCR -----------------------------------------------------------
-
 def pdf_to_text(pdf_path: Path) -> Tuple[str, bool]:
     """Metin katmanını kullanarak PDF'ten metin çıkar. (text, used_ocr=False)"""
     doc = fitz.open(pdf_path)
@@ -129,8 +127,6 @@ def ocr_pdf_to_text(pdf_path: Path) -> str:
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         pages.append(pytesseract.image_to_string(img, lang="tur"))  # Türkçe dil paketi yüklü olmalı
     return "\n\n".join(pages)
-
-# -------- Ayrıştırıcı ---------------------------------------------------------
 
 def split_articles(full_text: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Madde ve Geçici Madde bloklarını çıkar; bölüm başlıklarını/önsözü at."""
@@ -163,7 +159,6 @@ def split_articles(full_text: str) -> Tuple[List[Dict[str, Any]], List[Dict[str,
         return [], []
     text = text[first:]
 
-    # Eşleşme sınırlarını topla
     matches = []
     for m in MADDE_RE.finditer(text):
         matches.append(("normal", m.start(), m))
@@ -217,7 +212,6 @@ def heuristics_extract_meta(full_text: str) -> Dict[str, Optional[str]]:
 
     return {"ad": name, "kanun_no": no, "kabul_tarihi": kabul}
 
-# -------- Ana akış ------------------------------------------------------------
 
 def main():
     ap = argparse.ArgumentParser()
@@ -233,12 +227,12 @@ def main():
     if not pdf_path.exists():
         raise FileNotFoundError(f"Girdi PDF bulunamadı: {pdf_path}")
 
-    # 1) PDF'ten metin dene
+    # 1) PDF'ten metine
     text, used_ocr = pdf_to_text(pdf_path)
     # 2) Gerekirse OCR fallback
     if not text:
         if OCR_AVAILABLE:
-            print("⚠️ Metin katmanı bulunamadı. OCR ile çıkarılıyor...")
+            print("Metin katmanı bulunamadı. OCR ile çıkarılıyor...")
             text = ocr_pdf_to_text(pdf_path)
             used_ocr = True
         else:
@@ -255,7 +249,7 @@ def main():
         "source_url": source_url,
         "extraction": {
             "used_ocr": used_ocr,
-            "pages": None  # istersen len(fitz.open(pdf_path)) ekleyebilirsin
+            "pages": None  
         }
     }
 
@@ -263,8 +257,8 @@ def main():
     with out_path.open("w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, indent=2)
 
-    print(f"✅ Yazıldı: {out_path}")
-    print(f"   Maddeler: {len(normal)} | Geçici: {len(gecici)} | OCR: {used_ocr}")
+    print(f"Yazıldı: {out_path}")
+    print(f"Maddeler: {len(normal)} | Geçici: {len(gecici)} | OCR: {used_ocr}")
 
 if __name__ == "__main__":
     main()

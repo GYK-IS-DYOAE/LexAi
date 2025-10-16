@@ -25,7 +25,7 @@ function App() {
         {/* Protected Routes */}
         <Route path="/home" element={<HomePage />} />
 
-        {/* ✅ Chat artık ChatLayout içinde */}
+        {/* Chat artık ChatLayout içinde */}
         <Route element={<ChatLayout />}>
           <Route path="/chat" element={<ChatPage />} />
         </Route>

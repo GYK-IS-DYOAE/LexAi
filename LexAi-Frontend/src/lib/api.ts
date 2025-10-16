@@ -8,10 +8,10 @@ const api = axios.create({
   },
 });
 
-// 🔹 Token varsa otomatik ekle (hiç hata fırlatmaz)
+// Token varsa otomatik ekle (hiç hata fırlatmaz)
 api.interceptors.request.use((config) => {
   try {
-    // Zustand persist edilen token'ı oku
+    
     const stored = localStorage.getItem("auth-storage");
     if (stored) {
       const parsed = JSON.parse(stored);

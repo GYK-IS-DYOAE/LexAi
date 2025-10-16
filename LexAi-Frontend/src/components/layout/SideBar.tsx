@@ -15,32 +15,53 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAuthStore } from "@/features/auth/useAuthStore";
+import api from "@/lib/api";
+
+interface MenuItem {
+  name: string;
+  path: string;
+  icon: any;
+  onClick?: () => void;
+}
 
 export default function SideBar() {
   const { user, logout } = useAuthStore();
 
-  // Menü genişliği
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     return localStorage.getItem("lexai_sb_collapsed") === "1";
   });
 
-  // Sohbet geçmişi
-  const [chatHistory, setChatHistory] = useState<
-    { id: number; title: string }[]
-  >([]);
-
-  // Silme menüsü için açık olan sohbet id’si
-  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
-
-  useEffect(() => {
-    const saved = JSON.parse(localStorage.getItem("chat_history") || "[]");
-    setChatHistory(saved);
-  }, []);
-
+  const [chatHistory, setChatHistory] = useState<{ id: string; title: string }[]>([]);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const location = useLocation();
 
   const isAdmin = !!user?.is_admin;
   const onAdminPage = /^\/admin(?:\/|$)/.test(location.pathname);
+
+  // Sohbet geçmişini backend'den getir
+  const loadChatHistory = async () => {
+    try {
+      const res = await api.get("/conversation/list");
+      if (Array.isArray(res.data)) {
+        setChatHistory(res.data);
+        localStorage.setItem("chat_history", JSON.stringify(res.data));
+      }
+    } catch (err) {
+      console.warn("Sohbet listesi yüklenemedi, localStorage yüklenecek:", err);
+      const saved = JSON.parse(localStorage.getItem("chat_history") || "[]");
+      setChatHistory(saved);
+    }
+  };
+
+  useEffect(() => {
+    loadChatHistory();
+
+    // event listener ile canlı yenileme
+    const listener = () => loadChatHistory();
+    window.addEventListener("refresh-sessions", listener);
+
+    return () => window.removeEventListener("refresh-sessions", listener);
+  }, []);
 
   const toggleCollapse = () =>
     setCollapsed((prev) => {
@@ -54,33 +75,38 @@ export default function SideBar() {
     window.location.href = "/login";
   };
 
-  // ✅ Sohbet silme fonksiyonu
-  const handleDeleteChat = (id: number) => {
-    const full = JSON.parse(localStorage.getItem("chat_history_full") || "[]");
-    const short = JSON.parse(localStorage.getItem("chat_history") || "[]");
+  const handleDeleteChat = async (id: string) => {
+    try {
+      await api.delete(`/conversation/session/${id}`);
 
-    const updatedFull = full.filter((chat: any) => chat.id !== id);
-    const updatedShort = short.filter((chat: any) => chat.id !== id);
+      const updated = chatHistory.filter((c) => c.id !== id);
+      setChatHistory(updated);
+      localStorage.setItem("chat_history", JSON.stringify(updated));
 
-    localStorage.setItem("chat_history_full", JSON.stringify(updatedFull));
-    localStorage.setItem("chat_history", JSON.stringify(updatedShort));
+      setOpenMenuId(null);
+      window.dispatchEvent(new Event("refresh-sessions"));
 
-    setChatHistory(updatedShort);
-    setOpenMenuId(null);
+      // ChatPage'e haber ver
+      window.dispatchEvent(new Event("reset-chat"));
 
-    // Eğer silinen sohbet açık olan sohbetse, ana sayfaya yönlendir
-    if (window.location.search.includes(`id=${id}`)) {
-      window.history.replaceState(null, "", "/chat");
-      window.location.reload();
+      // Eğer aktif sohbetse URL'yi temizle
+      if (window.location.search.includes(`id=${id}`)) {
+        window.history.replaceState(null, "", "/chat");
+      }
+    } catch (err) {
+      console.error("Sohbet silinemedi:", err);
     }
   };
 
-  // ✅ Yeni Sohbet butonuna tıklanınca flag oluştur
+
+
   const handleNewChatClick = () => {
     localStorage.setItem("lexai_new_chat", "1");
+    window.history.replaceState(null, "", "/chat");
+    window.location.reload();
   };
 
-  const userMenu = [
+  const userMenu: MenuItem[] = [
     {
       name: "Yeni Sohbet",
       path: "/chat",
@@ -90,13 +116,13 @@ export default function SideBar() {
     { name: "Benzer Davalar", path: "/similar", icon: Scale },
   ];
 
-  const adminMenu = [
+  const adminMenu: MenuItem[] = [
     { name: "Admin Dashboard", path: "/admin", icon: ShieldCheck },
     { name: "Kullanıcılar", path: "/admin/users", icon: Users },
     { name: "Geri Bildirimler", path: "/admin/feedbacks", icon: MessageCircle },
   ];
 
-  const primaryItems =
+  const primaryItems: MenuItem[] =
     isAdmin && onAdminPage
       ? adminMenu
       : isAdmin
@@ -105,8 +131,10 @@ export default function SideBar() {
 
   return (
     <aside
-      className={`h-screen bg-[hsl(var(--card))] border-r border-[hsl(var(--border))] transition-[width] duration-300 ease-in-out
-      ${collapsed ? "w-16" : "w-72"} flex flex-col flex-none shrink-0 overflow-hidden`}
+      className={`h-screen transition-[width] duration-300 ease-in-out flex flex-col flex-none shrink-0 overflow-hidden
+        bg-[hsl(var(--card))] border-r border-[hsl(var(--border))] ${
+          collapsed ? "w-16" : "w-72"
+        }`}
     >
       {/* Üst Kısım */}
       <div className="h-14 px-3 border-b border-[hsl(var(--border))] flex items-center justify-between">
@@ -121,7 +149,7 @@ export default function SideBar() {
         )}
         <button
           onClick={toggleCollapse}
-          className="p-2 rounded-md hover:bg-[hsl(var(--muted))] text-[hsl(var(--muted-foreground))] transition"
+          className="p-2 rounded-md hover:bg-[hsl(var(--muted))/0.25] text-[hsl(var(--muted-foreground))] transition"
           aria-label="Menüyü daralt"
         >
           {collapsed ? <Menu size={18} /> : <X size={18} />}
@@ -136,7 +164,7 @@ export default function SideBar() {
               <NavLink
                 to={path}
                 end={path === "/admin"}
-                onClick={onClick}
+                onClick={onClick ? onClick : undefined}
                 className={({ isActive }) =>
                   `flex h-10 items-center ${
                     collapsed ? "justify-center" : "gap-3 px-3"
@@ -144,7 +172,7 @@ export default function SideBar() {
                   border ${
                     isActive
                       ? "border-[hsl(var(--lex-primary))] bg-[hsl(var(--lex-primary))] text-white shadow-[0_0_8px_rgba(185,28,28,0.4)]"
-                      : "border-transparent text-[hsl(var(--foreground))] hover:border-[hsl(var(--lex-primary))] hover:bg-[hsl(var(--lex-primary))/0.12] hover:text-[hsl(var(--lex-primary))]"
+                      : "border-transparent text-[hsl(var(--foreground))] hover:border-[hsl(var(--lex-primary))] hover:bg-[hsl(var(--lex-primary))/0.15] hover:text-[hsl(var(--lex-primary))]"
                   }`
                 }
               >
@@ -156,7 +184,7 @@ export default function SideBar() {
         </ul>
       </nav>
 
-      {/* ✅ Geçmiş Sohbetler */}
+      {/* Geçmiş Sohbetler */}
       {!collapsed && !onAdminPage && (
         <div className="px-3 mt-3 flex flex-col flex-1 overflow-hidden">
           <div className="flex items-center gap-2 px-2 py-1.5 flex-none">
@@ -166,32 +194,24 @@ export default function SideBar() {
             </span>
           </div>
 
-          {/* 🔽 Sohbet listesi kaydırılabilir alan */}
           <div
             className="flex-1 overflow-y-auto pr-1 mt-2 space-y-1
                        scrollbar-thin scrollbar-thumb-[hsl(var(--muted-foreground))/0.3]
-                       scrollbar-thumb-rounded-full scrollbar-track-transparent
-                       hover:scrollbar-thumb-[hsl(var(--muted-foreground))/0.5]"
+                       hover:scrollbar-thumb-[hsl(var(--muted-foreground))/0.5]
+                       scrollbar-thumb-rounded-full scrollbar-track-transparent"
           >
             {chatHistory.length > 0 ? (
               chatHistory.map((chat) => (
                 <div
                   key={chat.id}
+                  onClick={() => (window.location.href = `/chat?id=${chat.id}`)}
                   className="group relative flex items-center justify-between rounded-lg px-3 py-2 text-sm cursor-pointer select-none
-                      text-[hsl(var(--muted-foreground))] transition-all duration-200
-                      border border-transparent hover:border-[hsl(var(--lex-primary))/0.3]
-                      hover:bg-[hsl(var(--lex-primary))/0.08] hover:text-[hsl(var(--foreground))]"
+                    text-[hsl(var(--muted-foreground))] transition-all duration-200
+                    border border-transparent hover:border-[hsl(var(--lex-primary))/0.4]
+                    hover:bg-[hsl(var(--lex-primary))/0.12] hover:text-[hsl(var(--foreground))]"
                 >
-                  <div
-                    className="truncate pr-6"
-                    onClick={() =>
-                      (window.location.href = `/chat?id=${chat.id}`)
-                    }
-                  >
-                    {chat.title}
-                  </div>
+                  <div className="truncate pr-6">{chat.title || "Yeni Sohbet"}</div>
 
-                  {/* Üç Nokta Menüsü */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -199,12 +219,11 @@ export default function SideBar() {
                         prev === chat.id ? null : chat.id
                       );
                     }}
-                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-[hsl(var(--muted))]"
+                    className="absolute right-1 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-md hover:bg-[hsl(var(--muted))/0.4]"
                   >
                     <MoreVertical size={16} />
                   </button>
 
-                  {/* Silme Menüsü */}
                   {openMenuId === chat.id && (
                     <div
                       className="absolute right-6 top-1/2 -translate-y-1/2 bg-[hsl(var(--popover))] border border-[hsl(var(--border))]

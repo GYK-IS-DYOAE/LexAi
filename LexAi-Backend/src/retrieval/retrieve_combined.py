@@ -43,7 +43,7 @@ def _device():
     )
 
 def _build_opensearch() -> OpenSearch:
-    # Security kapalı olduğu için auth göndermiyoruz
+    # Security kapalı olduğu için auth yok.
     kwargs = dict(
         hosts=[{"host": OS_HOST, "port": OS_PORT}],
         scheme="http",         # ✅ HTTP
@@ -51,7 +51,7 @@ def _build_opensearch() -> OpenSearch:
         verify_certs=False,
         ssl_show_warn=False,
     )
-    # ileride security açarsan http_auth ekleyebilirsin
+    # ileride security için http_auth
     return OpenSearch(**kwargs)
 
 def _build_qdrant() -> QdrantClient:
@@ -201,9 +201,9 @@ if __name__ == "__main__":
     ap.add_argument("--topn", type=int, default=DEFAULT_TOPN)
     a = ap.parse_args()
 
-    print(f"🔎 Query: {a.query}")
+    print(f"Query: {a.query}")
     res = hybrid_search(a.query, topn=a.topn)
-    print("\n📌 Hibrit sonuçlar (MMR)")
+    print("\nHibrit sonuçlar (MMR)")
     _print(res)
 
 #python src/retrieval/retrieve_combined.py "nafaka"

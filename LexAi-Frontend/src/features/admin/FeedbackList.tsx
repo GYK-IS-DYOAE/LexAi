@@ -120,7 +120,7 @@ export default function FeedbackList() {
         </Card>
       </div>
 
-      {/* 🧩 Detay Modal */}
+      {/* Detay Modal */}
       <Dialog open={!!selected} onOpenChange={() => setSelected(null)}>
         <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
           <DialogHeader>
