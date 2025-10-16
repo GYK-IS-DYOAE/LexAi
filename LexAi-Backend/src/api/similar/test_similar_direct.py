@@ -52,11 +52,11 @@ def test_similar_search():
                     limit=5,
                     with_payload=True
                 )
-                print(f"✅ Success with {model_name} and legal_cases collection!")
+                print(f"Success with {model_name} and legal_cases collection!")
                 break
                 
             except Exception as e:
-                print(f"❌ Failed with {model_name}: {str(e)}")
+                print(f" Failed with {model_name}: {str(e)}")
                 if "lexai_cases" in str(e):
                     # Try lexai_cases collection as fallback
                     try:
@@ -67,14 +67,14 @@ def test_similar_search():
                             limit=5,
                             with_payload=True
                         )
-                        print(f"✅ Success with {model_name} and lexai_cases collection!")
+                        print(f" Success with {model_name} and lexai_cases collection!")
                         break
                     except Exception as e2:
-                        print(f"❌ Also failed with lexai_cases: {str(e2)}")
+                        print(f" Also failed with lexai_cases: {str(e2)}")
                 continue
         
         if query_vector is None:
-            print("❌ No working model found!")
+            print(" No working model found!")
             return
         
         points = results
@@ -89,7 +89,7 @@ def test_similar_search():
             if payload.get('gerekce'):
                 print(f"   Gerekce: {str(payload.get('gerekce'))[:100]}...")
             
-        print(f"\n✅ Search successful with model: {model_name if model else 'Unknown'}")
+        print(f"\n Search successful with model: {model_name if model else 'Unknown'}")
         
     except Exception as e:
         print(f"Error: {str(e)}")
