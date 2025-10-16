@@ -45,10 +45,10 @@ export const useAuthStore = create<AuthState>()(
           const token = data.access_token ?? null;
           if (!token) return false;
 
-          // ✅ token'ı kaydet
+          // token'ı kaydet
           set({ token });
 
-          // ✅ user bilgisini ayrı endpoint’ten çek
+          // user bilgisini ayrı endpoint’ten çek
           await get().fetchUser(token);
 
           return true;
@@ -58,7 +58,7 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      // 🔹 Kullanıcı bilgilerini al
+      // Kullanıcı bilgilerini al
       fetchUser: async (token: string) => {
         try {
           const res = await fetch("http://localhost:8000/auth/me", {

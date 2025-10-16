@@ -1,12 +1,3 @@
-# -*- coding: utf-8 -*-
-# balancedtotal.py
-# 1) data/interim/kararlar_segment.jsonl içindeki "Karar Metni"ni,
-#    data/interim/04_link_law.jsonl kayıtlarına ekler (Id ↔ doc_id, fallback: Esas/Karar No).
-# 2) dava_turu'ya göre TOTAL_TARGET kadar dengeli (balanced) jsonl üretir.
-# - BOM güvenli okuma (utf-8-sig)
-# - Anahtar çakışmasında en uzun metni seçer
-# - İstatistik çıktıları verir
-
 import json, random
 from pathlib import Path
 from collections import defaultdict

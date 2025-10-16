@@ -30,7 +30,6 @@ def pick_device() -> str:
 device = pick_device()
 model = SentenceTransformer(MODEL_NAME, device=device)
 
-# Başta gRPC deneriz; hata olursa otomatik HTTP'ye düşeriz
 client = QdrantClient(
     host=QDRANT_HOST,
     port=HTTP_PORT,
@@ -51,7 +50,7 @@ def sanity_checks():
     print(f"[CHECK] points_in_collection={cnt}")
 
 def query_once(qvec, top_k):
-    # INT8 quantization varsa sorguda yok say (OutputTooSmall hatasını önler)
+    
     search_params = rest.SearchParams(
         quantization=rest.QuantizationSearchParams(ignore=True)
     )
@@ -73,7 +72,6 @@ def search(query: str, top_k: int = TOP_K):
         results = query_once(qvec, top_k)
     except Exception as e:
         print(f"gRPC query failed → falling back to HTTP. Reason: {e}")
-        # HTTP'ye düş
         http_client = QdrantClient(host=QDRANT_HOST, port=HTTP_PORT, prefer_grpc=False, timeout=60.0)
         global client
         client = http_client

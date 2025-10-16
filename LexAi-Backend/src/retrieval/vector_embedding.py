@@ -22,7 +22,6 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
-# ================== Config ==================
 INPUT_FILE = "data/interim/balanced_total30k.jsonl"
 
 OUT_DIR = Path("data/processed/embeddings")
@@ -33,9 +32,9 @@ QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 QDRANT_GRPC_PORT = 6334
 
-CHUNK_SIZE_RECORDS = 3_000       # her 3k kayıt = 1 chunk (CPU/RAM)
+CHUNK_SIZE_RECORDS = 3_000       
 EMB_BATCH_SIZE = 32             
-QDRANT_UPSERT_BATCH = 128        # 32MB limitine takılmamak için
+QDRANT_UPSERT_BATCH = 128      
 
 MODEL_NAME = "BAAI/bge-m3"
 QDRANT_REQUEST_TIMEOUT = 120.0
@@ -61,7 +60,6 @@ def sha1(s: str) -> str:
 def make_point_id(m: Dict[str, Any]) -> int:
     """Deterministik 64-bit int ID."""
     base = f"{m.get('doc_id','')}|{m.get('section','')}|{m.get('text_sha1','')}"
-    # SHA1'den ilk 16 hex = 64-bit integer
     return int(hashlib.sha1(base.encode("utf-8")).hexdigest()[:16], 16)
 
 def safe_list(x: Any) -> List:
@@ -239,13 +237,12 @@ def process_and_upload_chunk(model: SentenceTransformer,
         meta_slice = metas[s:s+QDRANT_UPSERT_BATCH]
         points: List[rest.PointStruct] = []
         for m_payload, v in zip(meta_slice, vecs):
-            pid = make_point_id(m_payload)  # <- gRPC uyumlu int64 ID
+            pid = make_point_id(m_payload)  
             points.append(rest.PointStruct(id=pid, vector=v.tolist(), payload=m_payload))
         upsert_with_retry(client, points)
 
     print(f"[Upload] Chunk {pack.idx} done")
 
-    # (Opsiyonel) upload başarılıysa geçici dosyaları sil
     if SAVE_TEMP_FILES:
         try:
             (OUT_DIR / f"embeddings_chunk_{pack.idx}.npy").unlink(missing_ok=True)
@@ -261,7 +258,7 @@ def main():
     model = SentenceTransformer(MODEL_NAME, device=device)
     vector_size = model.get_sentence_embedding_dimension()
 
-    # qdrant (gRPC)
+    # qdrant 
     client = QdrantClient(
         host=QDRANT_HOST, port=QDRANT_PORT,
         grpc_port=QDRANT_GRPC_PORT, prefer_grpc=True,
@@ -274,7 +271,7 @@ def main():
     ensure_collection(client, vector_size, state)
     next_line = state.get("next_line", 0)
     chunk_idx = state.get("chunk_idx", 0)
-    print(f"▶ Resuming from line {next_line}, chunk {chunk_idx}")
+    print(f"Resuming from line {next_line}, chunk {chunk_idx}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -321,7 +318,7 @@ def main():
                 state["next_line"] = line_idx + 1
                 save_state(state)
 
-        print("🎉 Done.")
+        print("Done.")
     except KeyboardInterrupt:
         print("\nInterrupted by user. (Son TAM chunk'a kadar yüklendi)")
     except Exception as e:

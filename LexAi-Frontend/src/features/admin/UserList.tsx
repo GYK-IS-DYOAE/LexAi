@@ -27,7 +27,7 @@ export default function UserList() {
       const res = await api.get("/auth/users");
       setUsers(res.data);
     } catch {
-      setError("Kullanıcılar yüklenemedi ❌");
+      setError("Kullanıcılar yüklenemedi");
     } finally {
       setLoading(false);
     }

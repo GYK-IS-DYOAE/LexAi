@@ -1,7 +1,7 @@
 # python src/etl/01_segment.py --in data/interim/kararlar_clean.jsonl --out data/interim/kararlar_segment.json --cfg configs/regex_patterns.yml
 import re, json, yaml, argparse
 from pathlib import Path
-import pandas as pd  # csv girdi/çıktı için
+import pandas as pd 
 import csv
 
 def load_config(path: str | Path) -> dict:

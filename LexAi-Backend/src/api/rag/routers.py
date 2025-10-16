@@ -17,16 +17,20 @@ from src.models.conversation.message_model import SenderType
 
 router = APIRouter(tags=["RAG"])
 
+
 class QueryRequest(BaseModel):
     query: str
     topn: int = 8
     session_id: str | None = None
 
 class AskResponse(BaseModel):
+    question: str
     answer: str
+    question_id: str
+    answer_id: str
     feedback_id: str
     session_id: str
-    message_id: str
+
 
 @router.post("/ask", response_model=AskResponse)
 def ask(
@@ -34,25 +38,34 @@ def ask(
     db: Session = Depends(get_db),                 
     current_user: User = Depends(get_current_user)
 ):
-    """ 
-    1. Session varsa devam eder, yoksa oluşturulur. 
-    2. Kullanıcının sorusu Message tablosuna kaydedilir. 
-    3. LLM cevabı kaydedilir. 
-    4. Feedback kaydı oluşturulur. 
-    5. message_id, session_id frontend'e döner. 
     """
-    
-    # 0) Kullanıcı sorgusunu temizle/normalleştir
+    RAG üzerinden model yanıtı üretir.
+    - Session varsa devam eder, yoksa oluşturulur.
+    -  Kullanıcının mesajı kaydedilir.
+    - LLM cevabı üretilir ve kaydedilir.
+    - Feedback kaydı oluşturulur.
+    - Tüm metadata frontend'e döner.
+    """
+
+    # 0) Kullanıcı sorgusunu temizle / normalize et
     cleaned_query, precomputed_answer = process_user_query(req.query)
 
-    # 1) Session hazırla (yoksa oluştur)
+    # 1) Session yoksa oluştur
     if not req.session_id:
         session = create_session(db, user_id=current_user.id, title="Yeni Sohbet")
-        session_id = session.id
+        session_id = str(session.id)
     else:
-        session_id = req.session_id
+        # Mevcut session gerçekten var mı kontrol et
+        from src.models.conversation.conversation_crud import get_session_by_id
+        existing = get_session_by_id(db, req.session_id, current_user.id)
+        if not existing:
+            # Eğer session bulunamadıysa otomatik yeni oluştur
+            session = create_session(db, user_id=current_user.id, title="Yeni Sohbet")
+            session_id = str(session.id)
+        else:
+            session_id = req.session_id
 
-    # 2) Kullanıcı mesajını kaydet (raw metni meta_info’ya koy, içerik cleaned)
+    # 2) Kullanıcı mesajını kaydet
     user_msg = add_message(
         db=db,
         session_id=session_id,
@@ -61,7 +74,7 @@ def ask(
         meta_info={"raw_query": req.query}
     )
 
-    # 3) Eğer process_user_query hazır cevap döndürdüyse kısa devre
+    # 3) Eğer process_user_query hazır bir yanıt döndürdüyse kısa devre yap
     if precomputed_answer:
         assistant_msg = add_message(
             db=db,
@@ -70,6 +83,7 @@ def ask(
             content=precomputed_answer,
             meta_info={"reason": "precomputed_from_query_service"}
         )
+
         fb = feedback_crud.create_feedback(db, FeedbackCreate(
             user_id=current_user.id,
             question_id=user_msg.id,
@@ -79,23 +93,26 @@ def ask(
             vote=None,
             model="rule-based"
         ))
+
         return {
+            "question": cleaned_query,
             "answer": precomputed_answer,
+            "question_id": str(user_msg.id),
+            "answer_id": str(assistant_msg.id),
             "feedback_id": str(fb.id),
-            "session_id": str(session_id),
-            "message_id": str(assistant_msg.id)
+            "session_id": session_id
         }
 
-    # 4) Retrieval (cleaned_query ile)
+    # 4) Retrieval (Qdrant + OpenSearch)
     topn = max(1, min(req.topn, 20))
     hits = hybrid_search(cleaned_query, topn=topn)
     passages = [{"doc_id": h.doc_id, "text": h.text_repr} for h in hits]
 
-    # 5) Prompt + LLM
+    # 5) Prompt oluştur + LLM çağır
     user_prompt = build_user_prompt(cleaned_query, passages)
     answer = query_llm(SYSTEM_PROMPT, user_prompt)
 
-    # 6) Asistan mesajını kaydet
+    # 6) Model cevabını kaydet
     assistant_msg = add_message(
         db=db,
         session_id=session_id,
@@ -103,7 +120,7 @@ def ask(
         content=answer
     )
 
-    # 7) Feedback kaydı
+    # 7) Feedback kaydı oluştur
     fb = feedback_crud.create_feedback(db, FeedbackCreate(
         user_id=current_user.id,
         question_id=user_msg.id,
@@ -114,9 +131,12 @@ def ask(
         model="qwen2.5:7b-instruct"
     ))
 
+    # 8) Frontend'e tüm meta verileriyle birlikte dön
     return {
+        "question": cleaned_query,
         "answer": answer,
+        "question_id": str(user_msg.id),
+        "answer_id": str(assistant_msg.id),
         "feedback_id": str(fb.id),
-        "session_id": str(session_id),
-        "message_id": str(assistant_msg.id)
+        "session_id": session_id
     }
