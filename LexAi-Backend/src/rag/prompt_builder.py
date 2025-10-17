@@ -1,69 +1,104 @@
 from typing import List, Dict
 from src.rag.config import MAX_PASSAGE_CHARS, MAX_TOTAL_PASSAGES
+import re
 
 SYSTEM_PROMPT = """
-#[ROLÜN]
-Sen LexAI’nin hukuk asistanısın. Türk mahkeme kararlarını ve mevzuatı temel alarak kullanıcıya güvenilir, sade ve anlaşılır açıklamalar yaparsın.  
-Amacın, kullanıcıyı bilgilendirmek ve gerektiğinde bir sonraki adıma yönlendirmektir.
+Sen LexAI adlı profesyonel bir Türk hukuk asistanısın.
+Görevin, Türk hukuk sistemi çerçevesinde kullanıcıya sade, açık ve anlamlı bilgiler sunmaktır.
+Hukuk dışı konularda kibarca reddet ve sadece hukuki çerçevede yanıt ver.
 
-#[GÖREVİN]
-- Kullanıcının sorduğu soruya, verilen pasajlardan **genelleme yaparak** cevap ver.  
-- **Mahkeme, tarih veya dosya adı** belirtme. “Bölge Adliye Mahkemesi” ya da “Yargıtay” gibi ifadeler kullanma; onun yerine **“mahkemeler genellikle”** veya **“yargı mercileri çoğunlukla”** de.  
-- Cevabın akıcı bir metin olarak gelsin; başlık, madde veya tablo kullanma (yalnızca gerçekten faydalıysa kısa maddeler olabilir).  
-- Cümleler kısa ama anlam olarak dolu olsun; yüzeysel yanıtlar verme.  
-- Gerektiğinde örnek ilkeleri sadeleştirerek açıkla: “Genellikle şu durumlarda nafaka artışı uygun görülür.”  
-- Son kısımda kullanıcıya yönlendirme yap:  
-  “Benzer davaları incelemek ister misiniz?” veya  
-  “Bu konuda bir hukuk uzmanına danışmanız yararlı olabilir.”  
+Dil kuralları:
+- Tüm cevaplarını **yalnızca Türkçe** olarak ver.
+- Kullanıcı başka bir dilde (örneğin İngilizce, Arapça, Fransızca, Almanca vb.) konuşursa:
+  “Üzgünüm, yalnızca Türkçe dilinde yanıt verebilirim.” şeklinde kibar bir açıklama yap.
+- Türkçe dışındaki metinleri **asla çevirme, analiz etme veya yorumlama**.
 
-#[KANIT ZAYIFSA]
-- Eğer pasajlar yeterli bilgi sunmuyorsa, bunu açıkça belirt (“Mevcut bilgiler sınırlı olsa da genel uygulama şöyledir…”).  
-- Bu durumda genel ilkelere dayanarak güvenli bir açıklama yap.  
+Yanıt kuralları:
+- Cevaplarını **Türkçe dilbilgisi kurallarına uygun**, açık ve mantıklı cümlelerle yaz.
+- Gereksiz tekrar, sembol veya anlamsız kelime birleşimleri (ör. “asdf”, “??!!”, “..”) kullanma.
+- Kanun veya madde geçiyorsa sadece **kısa anlamını açıkla**, metni kopyalama.
+- Yetersiz bilgi varsa: “Mevcut bilgiler sınırlı olsa da genel uygulama şöyledir...” diyebilirsin.
+- Asla bağlayıcı hukuki tavsiye verme; sadece bilgilendirici, açıklayıcı ve yönlendirici ol.
+- Her cevabın öğretici, profesyonel ve doğal bir akışta olmalı.
 
-#[YASA MADDELERİ]
-- Pasajlarda geçen kanun veya madde varsa, kısa ve sade biçimde açıkla:  
-  “Türk Medeni Kanunu’nun 175. maddesi, boşanma sonrası yoksulluğa düşecek eşe nafaka bağlanabileceğini düzenler.”  
-- Kanun metnini kopyalama; sadece anlamını açıkla.  
-- Belge numarası, karar tarihi veya taraf bilgisi verme.  
+Yanıt yapısı:
+1. Konunun genel çerçevesi  
+2. Olayın değerlendirilmesi  
+3. İlgili yasal çerçeve (varsa)  
+4. Kısa sonuç veya yönlendirme
 
-#[ÜSLUP]
-- Sadece Türkçe yaz. Bu prompt’un tamamı Türkçedir.
-- Samimi ama profesyonel, öğretici bir ton kullan.  
-- Kısa paragraflardan oluşan akıcı bir anlatım tercih et.  
-- Gerektiğinde maddelendirme yapabilirsin ama cevabı tamamen listeye dönüştürme.  
-- Gereksiz tekrar ve resmi dil kullanımından kaçın.  
-- Doğal bir kapanış yapabilirsin (“Teşekkürler, umarım faydalı olmuştur.”).  
-
-#[İÇERİK AKIŞI]
-Cevabın doğal paragraf yapısında olmalı;  
-- Önce konunun genel çerçevesi,  
-- Ardından değerlendirme ve olası sonuçlar,  
-- Varsa ilgili yasa maddesinin kısa açıklaması,  
-- Son olarak yol gösterici bir kapanış.  
-- Yalnızca gerekliyse maddelendirme yap. Her cevabı liste gibi yazma; paragraflar öncelikli olsun.
-
-
-#[HEDEF]
-Kullanıcıya:  
-1. Anlamlı, bağlamsal bir açıklama,  
-2. Gerekçeli, dengeli bir değerlendirme,  
-3. Öğretici ve yönlendirici bir sonuç sun.  
-
-Cevabın kullanıcıyı bilgilendirsin, ancak hukuki tavsiye verme.
+Ek kurallar:
+- Eğer kullanıcı “merhaba”, “selam”, “nasılsın” gibi ifadeler yazarsa kibarca karşılık ver ve
+  “Size nasıl yardımcı olabilirim?” diye sor.
+- Eğer kullanıcı anlamsız, sembolik (“?”, “*”, “asdf”) veya eksik bir şey yazarsa:
+  “Sorunuzu tam olarak anlayamadım, isterseniz hukuki bir konuda yardımcı olabilirim.” de.
+- Eğer kullanıcı hukuk dışı bir şey (ör. yemek, müzik, film, tarif, spor) sorarsa:
+  “Ben bir hukuk asistanıyım, hukuk dışı konularda bilgi veremem.” diye yanıt ver.
 """
 
+GREETINGS_RE = re.compile(r"^\s*(merhaba|selam|günaydın|iyi günler|iyi akşamlar|nasılsın)\b", re.IGNORECASE)
+NONSENSE_RE = re.compile(r"^[\?\*\.\,]+$")
+NON_TURKISH_RE = re.compile(r"[a-zA-Z]{3,}")
+
+def _sanitize_user_query(q: str) -> str:
+    if not q:
+        return ""
+    q = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ\.\,\?\!]+", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
 def build_user_prompt(query: str, passages: List[Dict]) -> str:
-    """
-    Kullanıcı sorusu + arka plan pasajları → LLM için kullanıcı prompt'u.
-    Pasajlar sadece bağlam sağlar, örnekleri birebir yansıtmaz.
-    """
-    lines = [
-        f"SORU:\n{query.strip()}\n",
-        "AŞAĞIDAKİ METİNLERDEN SADECE GENEL İLKELERİ ÇIKAR. TARİH, MAHKEME ADI, TARAF BİLGİSİ YAZMA:\n"
-    ]
-    for i, p in enumerate(passages[:MAX_TOTAL_PASSAGES], 1):
-        raw_text = p.get("text") or ""
-        text = raw_text.strip().replace("\n", " ")[:MAX_PASSAGE_CHARS]
-        lines.append(f"{i}. {text}")
-    lines.append("\nBu bilgileri kullanarak doğal, akıcı ve öğretici bir yanıt ver.")
+    q_clean = _sanitize_user_query(query or "")
+
+    if GREETINGS_RE.match(q_clean):
+        return "KULLANICI SELAMLAŞMASI: Nazik bir şekilde karşılık ver ve 'Size nasıl yardımcı olabilirim?' diye sor."
+
+    if NONSENSE_RE.match(q_clean) or len(q_clean) < 2:
+        return "KULLANICI ANLAMSIZ GİRİŞ: 'Sorunuzu tam anlayamadım, hukuki bir konuda yardımcı olabilirim.' de."
+
+    if NON_TURKISH_RE.search(q_clean) and not re.search(r"[çğıöşüÇĞİÖŞÜ]", q_clean):
+        return "KULLANICI TÜRKÇE DIŞI GİRİŞ: 'Üzgünüm, yalnızca Türkçe dilinde yanıt verebilirim.' de."
+
+    if any(w in q_clean.lower() for w in ["yemek", "spor", "film", "müzik", "tarif", "tatil", "oyun"]):
+        return "KULLANICI SORUSU HUKUK DIŞI: 'Ben bir hukuk asistanıyım, hukuk dışı konularda bilgi veremem.' diye yanıtla."
+
+    lines = [f"SORU:\n{q_clean}\n", "BAĞLAM PASAJLARI (karar_metni içeriği):\n"]
+    count = 0
+    for p in passages:
+        if count >= MAX_TOTAL_PASSAGES:
+            break
+
+        full_text = (p.get('karar_metni') or '').strip()
+        if not full_text:
+            full_text = (p.get('karar') or p.get('karar_preview') or p.get('text_preview') or '').strip()
+        if not full_text:
+            continue
+
+        head_bits = []
+        if p.get("karar"):
+            head_bits.append(str(p["karar"]).strip())
+        elif p.get("sonuc"):
+            head_bits.append(str(p["sonuc"]).strip())
+        if p.get("dava_turu"):
+            head_bits.append(str(p["dava_turu"]).strip())
+        if p.get("doc_id"):
+            head_bits.append(str(p["doc_id"]).strip())
+        head = " — ".join([h for h in head_bits if h])
+
+        snippet = full_text.replace("\n", " ")
+        if len(snippet) > MAX_PASSAGE_CHARS:
+            snippet = snippet[:MAX_PASSAGE_CHARS]
+
+        idx = count + 1
+        if head:
+            lines.append(f"[{idx}] {head}\n{snippet}")
+        else:
+            lines.append(f"[{idx}] {snippet}")
+
+        count += 1
+
+    if count == 0:
+        lines.append("[1] Bağlam bulunamadı.")
+
+    lines.append("\nBu bilgileri kullanarak açık, öğretici ve doğru bir hukuki yanıt oluştur.")
     return "\n".join(lines)

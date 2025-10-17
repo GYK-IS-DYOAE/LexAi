@@ -111,3 +111,15 @@ def get_sessions_by_user(db: Session, user_id: str):
         .order_by(ConversationSession.created_at.desc())
         .all()
     )
+
+
+def get_last_messages(db: Session, session_id: str, limit: int = 4):
+    """Belirli bir oturumun son n mesajını (sıralı şekilde) getirir."""
+    from src.models.conversation.message_model import Message
+    return (
+        db.query(Message)
+        .filter(Message.session_id == session_id)
+        .order_by(Message.created_at.desc())
+        .limit(limit)
+        .all()[::-1]  # kronolojik sıraya çevir
+    )

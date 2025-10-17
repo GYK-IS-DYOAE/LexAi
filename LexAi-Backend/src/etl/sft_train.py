@@ -4,23 +4,23 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingA
 from datasets import load_dataset
 from peft import LoraConfig, get_peft_model, TaskType, prepare_model_for_int8_training
 
-# ---------------- CONFIG ----------------
-BASE_MODEL = "meta-llama/Llama-2-7b-hf"  # LLaMA-2 HF
-SFT_DATA = "sft_data.jsonl"              # Senin soru-cevap JSONL dosyan
+
+BASE_MODEL = "meta-llama/Llama-2-7b-hf"  
+SFT_DATA = "sft_data.jsonl"              
 OUTPUT_DIR = "./llama2-tr-sft"
 MAX_LENGTH = 512
 BATCH_SIZE = 2
 GRAD_ACCUM = 4
 NUM_EPOCHS = 3
 LEARNING_RATE = 3e-4
-# ----------------------------------------
+
 
 print("Tokenizer ve model yükleniyor...")
 tokenizer = AutoTokenizer.from_pretrained(BASE_MODEL)
 model = AutoModelForCausalLM.from_pretrained(BASE_MODEL, device_map="auto")
 model = prepare_model_for_int8_training(model)
 
-print("⚡ LoRA SFT ayarlanıyor...")
+print("LoRA SFT ayarlanıyor...")
 peft_config = LoraConfig(
     task_type=TaskType.CAUSAL_LM,
     r=16,
@@ -31,7 +31,7 @@ peft_config = LoraConfig(
 )
 model = get_peft_model(model, peft_config)
 
-print("📚 Dataset yükleniyor...")
+print("Dataset yükleniyor...")
 dataset = load_dataset("json", data_files=SFT_DATA)["train"]
 
 def tokenize_fn(batch):
@@ -63,6 +63,6 @@ trainer = Trainer(
 print("Eğitim başlıyor...")
 trainer.train()
 
-print("💾 Model kaydediliyor...")
+print("Model kaydediliyor...")
 trainer.save_model(OUTPUT_DIR)
 print("Eğitim tamamlandı, model kaydedildi:", OUTPUT_DIR)

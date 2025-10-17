@@ -1,30 +1,24 @@
-# src/retrieval/retrieve_combined.py
-# ------------------------------------------------------------
-# Hibrit Retrieve:
-#  - OpenSearch (BM25) ve Qdrant (semantic) ayrı ayrı top-50,
-#  - skorları normalize edip doc_id bazında birleştir,
-#  - MMR ile hem alaka hem çeşitlilik optimize edilerek top-N döndür.
-# ------------------------------------------------------------
-
 from __future__ import annotations
 import argparse
+import re
+import json
 from dataclasses import dataclass
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Tuple
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-
 from opensearchpy import OpenSearch
 from qdrant_client import QdrantClient
+from qdrant_client.http import models as rest
 from sentence_transformers import SentenceTransformer
 import torch
 
 from src.rag.config import (
-    OS_HOST, OS_PORT, OS_USER, OS_PASS, OS_INDEX,
+    OS_HOST, OS_PORT, OS_INDEX,
     QDRANT_HOST, QDRANT_PORT, QDRANT_COLLECTION,
     EMBED_MODEL_NAME,
     TOP_K_OS, TOP_K_QDRANT, MMR_LAMBDA, DEFAULT_TOPN,
-    MAX_PASSAGE_CHARS, MAX_TOTAL_PASSAGES
+    MAX_PASSAGE_CHARS,
 )
 
 
@@ -33,66 +27,94 @@ class Hit:
     doc_id: str
     score_raw: float
     score_norm: float
-    source: str               # "opensearch" | "qdrant" | "both"
+    source: str
     payload: Dict[str, Any]
-    text_repr: str
+    text_repr: str        # kısa özet
+    text_full: str = ""   # LLM’e gidecek tam içerik
+
+
+LAW_PAT = re.compile(
+    r"\b(?:(HMK|HUMK|TBK|TMK|İK|IK|İŞ\s*KANUNU|IS\s*KANUNU|4857|6100))\s*(\d{1,3})?(?:\s*/\s*(\d{1,2}))?",
+    flags=re.IGNORECASE,
+)
 
 def _device():
-    return "cuda" if torch.cuda.is_available() else (
-        "mps" if torch.backends.mps.is_available() else "cpu"
-    )
+    return "cuda" if torch.cuda.is_available() else "cpu"
+
+def _detect_laws(q: str) -> List[str]:
+    out: List[str] = []
+    for m in LAW_PAT.finditer(q or ""):
+        code = (m.group(1) or "").upper().replace("IS", "İŞ").replace("IK", "İK")
+        art, fik = m.group(2) or "", m.group(3) or ""
+        if code in ("4857", "6100"):
+            code = "İŞ KANUNU" if code == "4857" else "HMK"
+        if code == "İK":
+            code = "İŞ KANUNU"
+        tag = code + (f" {art}" if art else "") + (f"/{fik}" if fik else "")
+        if tag not in out:
+            out.append(tag)
+    return out
 
 def _build_opensearch() -> OpenSearch:
-    # Security kapalı olduğu için auth yok.
-    kwargs = dict(
+    return OpenSearch(
         hosts=[{"host": OS_HOST, "port": OS_PORT}],
-        scheme="http",        
-        use_ssl=False,         
+        scheme="http",
+        use_ssl=False,
         verify_certs=False,
         ssl_show_warn=False,
+        timeout=60,
     )
-    # ileride security için http_auth
-    return OpenSearch(**kwargs)
 
 def _build_qdrant() -> QdrantClient:
-    return QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=60.0)
+    return QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT, timeout=60.0, prefer_grpc=True)
 
-def _text_repr_from_payload(payload: Dict[str, Any]) -> str:
-    t = payload.get("text")
-    if isinstance(t, str) and t.strip():
-        return t[:800]
-    parts = []
-    for k in ("karar", "gerekce", "hikaye"):
-        v = payload.get(k)
-        if isinstance(v, str):
-            parts.append(v)
-        elif isinstance(v, list):
-            parts.extend([x for x in v if isinstance(x, str)])
-    if parts:
-        return " ".join(parts)[:800]
-    return str(payload.get("dava_turu") or "")[:200]
 
-def _minmax_norm(vals: List[float]) -> List[float]:
-    if not vals:
-        return []
-    mn, mx = float(min(vals)), float(max(vals))
-    if mx <= mn:
-        return [1.0 for _ in vals]
-    return [(x - mn) / (mx - mn) for x in vals]
 
-def search_opensearch(query: str, top_k: int = TOP_K_OS) -> List[Hit]:
+def _combine_full_text(payload: Dict[str, Any]) -> str:
+    """
+    Gerekçe, karar, hikaye, kanun atıfları gibi alanları birleştirerek
+    LLM için anlamlı tam metin oluşturur.
+    """
+    parts: List[str] = []
+    for key in ("hikaye", "gerekce", "karar", "karar_metni_meta", "text_preview"):
+        val = payload.get(key)
+        if isinstance(val, str) and val.strip():
+            parts.append(val.strip())
+        elif isinstance(val, list):
+            parts.extend([x.strip() for x in val if isinstance(x, str)])
+    full_text = " ".join(parts).strip()
+    return full_text[:MAX_PASSAGE_CHARS] if full_text else ""
+
+
+def search_opensearch(query: str) -> List[Hit]:
     client = _build_opensearch()
+    laws = _detect_laws(query)
+    should_terms = [{"terms": {"laws_norm": laws, "boost": 3}}] if laws else []
     body = {
-        "size": top_k,
+        "size": TOP_K_OS,
         "query": {
-            "multi_match": {
-                "query": query,
-                "fields": ["dava_turu", "taraf_iliskisi", "sonuc", "karar", "gerekce", "hikaye"],
+            "bool": {
+                "must": [{
+                    "multi_match": {
+                        "query": query,
+                        "type": "best_fields",
+                        "fields": [
+                            "dava_turu^4",
+                            "laws_norm^3",
+                            "gerekce^2",
+                            "karar^1.5",
+                            "hikaye^1",
+                        ],
+                        "operator": "and",
+                    }
+                }],
+                "should": should_terms
             }
         }
     }
+
     res = client.search(index=OS_INDEX, body=body)
-    hits = res.get("hits", {}).get("hits", [])
+    hits = res.get("hits", {}).get("hits", []) or []
     scores = [float(h.get("_score", 0.0)) for h in hits]
     scores_norm = _minmax_norm(scores)
 
@@ -108,60 +130,97 @@ def search_opensearch(query: str, top_k: int = TOP_K_OS) -> List[Hit]:
             score_norm=s_norm,
             source="opensearch",
             payload=src,
-            text_repr=_text_repr_from_payload(src),
+            text_repr=_first_sentence(_combine_full_text(src), 250),
+            text_full=_combine_full_text(src)
         ))
     return out
 
-def search_qdrant(query: str, model: SentenceTransformer, top_k: int = TOP_K_QDRANT) -> List[Hit]:
+
+def search_qdrant(query: str, model: SentenceTransformer) -> List[Hit]:
     client = _build_qdrant()
-    qvec = model.encode(query, normalize_embeddings=True).tolist()
-    res = client.query_points(QDRANT_COLLECTION, qvec, limit=top_k, with_payload=True)
-    pts = getattr(res, "points", []) or []
-    scores = [float(p.score or 0.0) for p in pts]
+    qvec = model.encode(query.strip(), normalize_embeddings=True).tolist()
+    pts = client.query_points(
+        collection_name=QDRANT_COLLECTION,
+        query=qvec,
+        limit=TOP_K_QDRANT,
+        with_payload=True,
+        search_params=rest.SearchParams(quantization=rest.QuantizationSearchParams(ignore=True))
+    ).points or []
+
+    scores = [float(getattr(p, "score", 0.0) or 0.0) for p in pts]
     scores_norm = _minmax_norm(scores)
 
     out: List[Hit] = []
     for p, s_norm in zip(pts, scores_norm):
-        payload = p.payload or {}
-        doc_id = str(payload.get("doc_id") or p.id or "")
+        payload = getattr(p, "payload", {}) or {}
+        doc_id = str(payload.get("doc_id") or getattr(p, "id", "") or "")
         if not doc_id:
             continue
         out.append(Hit(
             doc_id=doc_id,
-            score_raw=float(p.score or 0.0),
+            score_raw=float(getattr(p, "score", 0.0) or 0.0),
             score_norm=s_norm,
             source="qdrant",
             payload=payload,
-            text_repr=_text_repr_from_payload(payload),
+            text_repr=_first_sentence(_combine_full_text(payload), 250),
+            text_full=_combine_full_text(payload)
         ))
     return out
 
-def fuse_hits(os_hits: List[Hit], qd_hits: List[Hit]) -> List[Hit]:
-    fused = {h.doc_id: h for h in os_hits}
-    for h in qd_hits:
-        if h.doc_id in fused:
-            a = fused[h.doc_id]
-            fused_score = (a.score_norm + h.score_norm) / 2.0
-            payload = a.payload if a.source == "opensearch" else h.payload
-            text_repr = a.text_repr or h.text_repr
-            fused[h.doc_id] = Hit(
-                doc_id=h.doc_id,
-                score_raw=0.0,
-                score_norm=fused_score,
-                source="both",
-                payload=payload,
-                text_repr=text_repr,
-            )
-        else:
-            fused[h.doc_id] = h
-    return sorted(fused.values(), key=lambda x: x.score_norm, reverse=True)[:100]
+
+def _minmax_norm(vals: List[float]) -> List[float]:
+    if not vals:
+        return []
+    mn, mx = float(min(vals)), float(max(vals))
+    if mx <= mn:
+        return [1.0 for _ in vals]
+    return [(x - mn) / (mx - mn) for x in vals]
+
+def _first_sentence(t: str, max_len: int = 220) -> str:
+    t = (t or "").strip()
+    if not t:
+        return ""
+    s = re.split(r"(?<=[\.\!\?])\s+", t)[0]
+    return (s[:max_len] + "…") if len(s) > max_len else s
+
+def fuse_hits(os_hits: List[Hit], qd_hits: List[Hit], user_query: str) -> List[Hit]:
+    laws = _detect_laws(user_query)
+    alpha_dense, beta_bm25 = (0.6, 0.4) if laws else (0.7, 0.3)
+
+    by_id: Dict[str, Dict[str, float]] = {}
+    payload_by_id: Dict[str, Dict[str, Any]] = {}
+    text_by_id: Dict[str, Tuple[str, str]] = {}  # (repr, full)
+
+    for h in os_hits + qd_hits:
+        by_id.setdefault(h.doc_id, {})[h.source] = h.score_norm
+        if h.doc_id not in payload_by_id:
+            payload_by_id[h.doc_id] = h.payload
+            text_by_id[h.doc_id] = (h.text_repr, h.text_full)
+
+    fused: List[Hit] = []
+    for doc_id, comps in by_id.items():
+        dense = comps.get("qdrant", 0.0)
+        bm25 = comps.get("opensearch", 0.0)
+        combined = alpha_dense * dense + beta_bm25 * bm25
+        repr_text, full_text = text_by_id.get(doc_id, ("", ""))
+        fused.append(Hit(
+            doc_id=doc_id,
+            score_raw=0.0,
+            score_norm=combined,
+            source="hybrid",
+            payload=payload_by_id.get(doc_id, {}),
+            text_repr=repr_text,
+            text_full=full_text
+        ))
+    return sorted(fused, key=lambda x: x.score_norm, reverse=True)[:100]
+
 
 def mmr_select(query: str, candidates: List[Hit], model: SentenceTransformer, top_n: int, lambda_: float) -> List[Hit]:
     if not candidates:
         return []
     candidates = candidates[:50]
     q = model.encode([query], normalize_embeddings=True)
-    embs = model.encode([c.text_repr for c in candidates], normalize_embeddings=True)
+    embs = model.encode([c.text_full for c in candidates], normalize_embeddings=True)
     rel = cosine_similarity(embs, q).reshape(-1)
 
     selected = []
@@ -181,29 +240,11 @@ def mmr_select(query: str, candidates: List[Hit], model: SentenceTransformer, to
         remaining.remove(best)
     return [candidates[i] for i in selected]
 
+
 def hybrid_search(query: str, topn: int = DEFAULT_TOPN) -> List[Hit]:
     model = SentenceTransformer(EMBED_MODEL_NAME, device=_device())
-    os_hits = search_opensearch(query, TOP_K_OS)
-    qd_hits = search_qdrant(query, model, TOP_K_QDRANT)
-    fused = fuse_hits(os_hits, qd_hits)
+    os_hits = search_opensearch(query)
+    qd_hits = search_qdrant(query, model)
+    fused = fuse_hits(os_hits, qd_hits, query)
     picked = mmr_select(query, fused, model, top_n=topn, lambda_=MMR_LAMBDA)
     return picked
-
-def _print(hits: List[Hit]):
-    for i, h in enumerate(hits, 1):
-        p = h.payload or {}
-        print(f"{i}. score={h.score_norm:.3f} | src={h.source} | doc_id={h.doc_id} | "
-              f"dava_turu={p.get('dava_turu','—')} | sonuc={p.get('sonuc','—')}")
-
-if __name__ == "__main__":
-    ap = argparse.ArgumentParser()
-    ap.add_argument("query", type=str)
-    ap.add_argument("--topn", type=int, default=DEFAULT_TOPN)
-    a = ap.parse_args()
-
-    print(f"Query: {a.query}")
-    res = hybrid_search(a.query, topn=a.topn)
-    print("\nHibrit sonuçlar (MMR)")
-    _print(res)
-
-#python src/retrieval/retrieve_combined.py "nafaka"
