@@ -37,7 +37,7 @@ def main():
         line = '"maddeler":' + json.dumps(cikti, ensure_ascii=False, separators=(",", ":"))
         f.write(line + "\n")
 
-    print(f"✅ Çıktı üretildi: {OUTPUT_PATH}")
+    print(f"Çıktı üretildi: {OUTPUT_PATH}")
 
 if __name__ == "__main__":
     main()

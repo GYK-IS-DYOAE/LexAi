@@ -16,7 +16,10 @@ QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 QDRANT_COLLECTION = "lexai_cases"
 
-EMBED_MODEL_NAME = "BAAI/bge-m3"   # Sentence embedding modeli
+# ======================================
+# ✨ Embedding Model (Retrieval için)
+# ======================================
+EMBED_MODEL_NAME = "KocLab-Bilkent/BERTurk-Legal"   # Sentence embedding modeli
 
 MAX_PASSAGE_CHARS = 1200           # Her pasajdan LLM'e en fazla kaç karakter verilecek
 MAX_TOTAL_PASSAGES = 8             # LLM'e en fazla kaç pasaj gönderilecek
