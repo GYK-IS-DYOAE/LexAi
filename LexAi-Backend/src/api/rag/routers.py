@@ -1,40 +1,33 @@
 from uuid import uuid4
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+import logging
 
 from src.api.auth.security import get_current_user
 from src.core.deps import get_db
 from src.models.auth.user_model import User
 
-# 🔹 RAG pipeline bileşenleri
 from src.retrieval.retrieve_combined import hybrid_search
 from src.rag.prompt_builder import SYSTEM_PROMPT, build_user_prompt
 from src.rag.query_llm import query_llm
+from src.rag.config import MAX_TOTAL_PASSAGES, LLM_MODEL_NAME
 
-# 🔹 Yardımcı servisler
 from src.user_input.query_service import process_user_query
 from src.models.feedback import feedback_crud
 from src.models.feedback.feedback_schemas import FeedbackCreate
 from src.models.conversation.conversation_crud import (
-    create_session,
-    add_message,
-    get_last_messages,
-    get_session_by_id,
+    create_session, add_message, get_last_messages, get_session_by_id,
 )
 from src.models.conversation.message_model import SenderType
 
-
 router = APIRouter(tags=["RAG"])
-
-
-# ==================== Request / Response ====================
+logger = logging.getLogger("uvicorn.error")
 
 class QueryRequest(BaseModel):
     query: str
     topn: int = 8
     session_id: str | None = None
-
 
 class AskResponse(BaseModel):
     question: str
@@ -44,28 +37,15 @@ class AskResponse(BaseModel):
     feedback_id: str
     session_id: str
 
-
-# ==================== Endpoint ====================
-
-@router.post("/ask", response_model=AskResponse, summary="LLM üzerinden RAG cevabı üret")
+@router.post("/ask", response_model=AskResponse)
 def ask(
     req: QueryRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    🔹 RAG pipeline üzerinden LLM yanıtı üretir.
-    - Kullanıcı girişini temizler (process_user_query)
-    - Hibrit arama (Qdrant + OpenSearch) ile benzer karar_metni'leri bulur
-    - Bu karar metinlerinden bağlam prompt'u oluşturur
-    - LLM yanıtı üretir (Qwen 2.5)
-    - Hem mesaj hem feedback kayıtlarını oluşturur
-    """
-
-    # 1️⃣ Sorguyu ön işle (regex + temizlik + rule-based cevap varsa yakala)
     cleaned_query, precomputed_answer = process_user_query(req.query)
 
-    # 2️⃣ Sohbet oturumunu al / oluştur
+    # session
     if not req.session_id:
         session = create_session(db, user_id=current_user.id, title="Yeni Sohbet")
         session_id = str(session.id)
@@ -73,104 +53,127 @@ def ask(
         existing = get_session_by_id(db, req.session_id, current_user.id)
         session_id = str(existing.id) if existing else str(create_session(db, user_id=current_user.id, title="Yeni Sohbet").id)
 
-    # 3️⃣ Kullanıcı mesajını kaydet
+    # user msg
     user_msg = add_message(
-        db=db,
-        session_id=session_id,
-        sender=SenderType.user,
-        content=cleaned_query,
-        meta_info={"raw_query": req.query},
+        db=db, session_id=session_id, sender=SenderType.user,
+        content=cleaned_query, meta_info={"raw_query": req.query},
     )
 
-    # 4️⃣ Eğer precomputed cevap varsa, direkt dön
     if precomputed_answer:
         assistant_msg = add_message(
-            db=db,
-            session_id=session_id,
-            sender=SenderType.assistant,
-            content=precomputed_answer,
-            meta_info={"reason": "precomputed_from_query_service"},
+            db=db, session_id=session_id, sender=SenderType.assistant,
+            content=precomputed_answer, meta_info={"reason": "precomputed_from_query_service"},
         )
-
         fb = feedback_crud.create_feedback(
-            db,
-            FeedbackCreate(
-                user_id=current_user.id,
-                question_id=user_msg.id,
-                answer_id=assistant_msg.id,
-                question_text=cleaned_query,
-                answer_text=precomputed_answer,
-                vote=None,
-                model="rule-based",
+            db, FeedbackCreate(
+                user_id=current_user.id, question_id=user_msg.id, answer_id=assistant_msg.id,
+                question_text=cleaned_query, answer_text=precomputed_answer, vote=None, model="rule-based",
             ),
         )
-
         return AskResponse(
-            question=cleaned_query,
-            answer=precomputed_answer,
-            question_id=str(user_msg.id),
-            answer_id=str(assistant_msg.id),
-            feedback_id=str(fb.id),
-            session_id=session_id,
+            question=cleaned_query, answer=precomputed_answer,
+            question_id=str(user_msg.id), answer_id=str(assistant_msg.id),
+            feedback_id=str(fb.id), session_id=session_id,
         )
 
-    # 5️⃣ Hibrit arama (tam karar metinlerini al)
+    # hybrid search → passages
     topn = max(1, min(req.topn, 20))
     hits = hybrid_search(cleaned_query, topn=topn)
 
-    # 🔹 Karar metinlerini doğrudan kullan
-    passages = [
-        {
-            "doc_id": h.doc_id,
-            "karar_metni": h.payload.get("karar_metni_meta") or h.payload.get("karar_metni_raw") or h.text_full or ""
-        }
-        for h in hits if (h.payload.get("karar_metni_meta") or h.payload.get("karar_metni_raw"))
-    ]
+    seen, passages = set(), []
+    for h in hits:
+        if h.doc_id in seen: 
+            continue
+        full_txt = (
+            h.payload.get("karar_metni_meta")
+            or h.payload.get("karar_metni_raw")
+            or getattr(h, "text_full", None)
+            or ""
+        )
+        if full_txt:
+            passages.append({"doc_id": h.doc_id, "karar_metni": full_txt})
+            seen.add(h.doc_id)
+        if len(passages) >= MAX_TOTAL_PASSAGES:
+            break
 
     if not passages:
         raise HTTPException(status_code=404, detail="İlgili karar metni bulunamadı.")
 
-    # 6️⃣ Önceki mesajlardan bağlam oluştur
+    # history
     history_msgs = get_last_messages(db, session_id=session_id, limit=6)
     conversation_history = [
         {"user": m.content} if m.sender == SenderType.user else {"assistant": m.content}
         for m in history_msgs
     ]
 
-    # 7️⃣ LLM için prompt oluştur
-    user_prompt = build_user_prompt(cleaned_query, passages, conversation_history)
+    # build prompt (tuple veya str)
+    up_out = build_user_prompt(cleaned_query, passages, conversation_history)
+    if isinstance(up_out, tuple):
+        user_prompt, early_answer = up_out
+        if early_answer:
+            assistant_msg = add_message(db=db, session_id=session_id, sender=SenderType.assistant, content=early_answer)
+            fb = feedback_crud.create_feedback(
+                db, FeedbackCreate(
+                    user_id=current_user.id, question_id=user_msg.id, answer_id=assistant_msg.id,
+                    question_text=cleaned_query, answer_text=early_answer, vote=None, model="rule-based",
+                ),
+            )
+            return AskResponse(
+                question=cleaned_query, answer=early_answer,
+                question_id=str(user_msg.id), answer_id=str(assistant_msg.id),
+                feedback_id=str(fb.id), session_id=session_id,
+            )
+    else:
+        user_prompt = up_out
 
-    # 8️⃣ LLM’den yanıt al
-    answer = query_llm(SYSTEM_PROMPT, user_prompt)
+    # >>> KESİN LOG: LLM ÖNCESİ USER_PROMPT'U YAZ <<<
+    print("\n===== USER_PROMPT (PRE-LLM) BEGIN =====\n", flush=True)
+    print(user_prompt, flush=True)
+    print("\n===== USER_PROMPT (PRE-LLM) END =====\n", flush=True)
+    logger.info("user_prompt_len=%d | passages=%d", len(user_prompt), len(passages))
+    if passages:
+        logger.info("first_passage_snippet=%s", (passages[0]['karar_metni'][:300].replace("\n", " ")))
 
-    # 9️⃣ Asistan cevabını kaydet
+    # LLM
+    try:
+        ans, full_prompt = query_llm(
+            SYSTEM_PROMPT,
+            user_prompt,
+            return_prompt=True,
+            num_ctx=16384,
+            num_predict=1024,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM isteği başarısız: {e}")
+
+    # >>> KESİN LOG: FULL PROMPT'U YAZ (yoksa kendimiz birleştirip yaz) <<<
+    if full_prompt:
+        print("\n===== LLM FULL_PROMPT BEGIN =====\n", flush=True)
+        print(full_prompt, flush=True)
+        print("\n===== LLM FULL_PROMPT END =====\n", flush=True)
+        logger.info("full_prompt_len=%d", len(full_prompt))
+    else:
+        merged = f"<SYSTEM>\n{SYSTEM_PROMPT}\n</SYSTEM>\n\n<USER>\n{user_prompt}\n</USER>"
+        print("\n===== LLM FULL_PROMPT (FALLBACK) BEGIN =====\n", flush=True)
+        print(merged, flush=True)
+        print("\n===== LLM FULL_PROMPT (FALLBACK) END =====\n", flush=True)
+        logger.info("full_prompt_fallback_len=%d", len(merged))
+
+    # save assistant message
     assistant_msg = add_message(
-        db=db,
-        session_id=session_id,
-        sender=SenderType.assistant,
-        content=answer,
+        db=db, session_id=session_id, sender=SenderType.assistant, content=ans,
+        meta_info={"model": "qwen2.5:7b-instruct", "passage_count": len(passages)},
     )
 
-    # 🔟 Feedback kaydı oluştur
     fb = feedback_crud.create_feedback(
-        db,
-        FeedbackCreate(
-            user_id=current_user.id,
-            question_id=user_msg.id,
-            answer_id=assistant_msg.id,
-            question_text=cleaned_query,
-            answer_text=answer,
-            vote=None,
-            model="qwen2.5:7b-instruct",
+        db, FeedbackCreate(
+            user_id=current_user.id, question_id=user_msg.id, answer_id=assistant_msg.id,
+            question_text=cleaned_query, answer_text=ans, vote=None, model=LLM_MODEL_NAME,
         ),
     )
 
-    # ✅ Sonuç döndür
     return AskResponse(
-        question=cleaned_query,
-        answer=answer,
-        question_id=str(user_msg.id),
-        answer_id=str(assistant_msg.id),
-        feedback_id=str(fb.id),
-        session_id=session_id,
+        question=cleaned_query, answer=ans,
+        question_id=str(user_msg.id), answer_id=str(assistant_msg.id),
+        feedback_id=str(fb.id), session_id=session_id,
     )
