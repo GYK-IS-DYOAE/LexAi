@@ -20,7 +20,6 @@ from src.rag.config import (
     MAX_PASSAGE_CHARS
 )
 
-# ===================== DATA MODEL =====================
 
 @dataclass
 class Hit:
@@ -32,8 +31,6 @@ class Hit:
     text_repr: str
     text_full: str
 
-
-# ===================== HELPERS =====================
 
 def _device():
     if torch.cuda.is_available():
@@ -78,7 +75,7 @@ def _text_fields(payload: Dict[str, Any]) -> Tuple[str, str]:
     - karar_metni → tam karar metni
     - karar_preview → özet
     """
-    text_full = (payload.get("karar_metni") or "").strip()
+    text_full = (payload.get("karar_metni_meta") or "").strip()
     text_repr = (payload.get("karar_preview") or text_full[:400]).strip()
 
     if len(text_full) > MAX_PASSAGE_CHARS:
@@ -86,8 +83,6 @@ def _text_fields(payload: Dict[str, Any]) -> Tuple[str, str]:
 
     return text_repr, text_full
 
-
-# ===================== SEARCH (OpenSearch) =====================
 
 def search_opensearch(query: str, top_k: int = TOP_K_OS) -> List[Hit]:
     client = _build_opensearch()
@@ -133,8 +128,6 @@ def search_opensearch(query: str, top_k: int = TOP_K_OS) -> List[Hit]:
     return out
 
 
-# ===================== SEARCH (Qdrant) =====================
-
 def search_qdrant(query: str, model: SentenceTransformer, top_k: int = TOP_K_QDRANT) -> List[Hit]:
     client = _build_qdrant()
     qvec = model.encode(query.strip(), normalize_embeddings=True).tolist()
@@ -168,8 +161,6 @@ def search_qdrant(query: str, model: SentenceTransformer, top_k: int = TOP_K_QDR
     return out
 
 
-# ===================== FUSION =====================
-
 def fuse_hits(os_hits: List[Hit], qd_hits: List[Hit]) -> List[Hit]:
     by_id: Dict[str, Dict[str, float]] = {}
     payload_by_id: Dict[str, Dict[str, Any]] = {}
@@ -199,8 +190,6 @@ def fuse_hits(os_hits: List[Hit], qd_hits: List[Hit]) -> List[Hit]:
     return sorted(fused, key=lambda x: x.score_norm, reverse=True)[:100]
 
 
-# ===================== MMR =====================
-
 def mmr_select(query: str, candidates: List[Hit], model: SentenceTransformer, top_n: int, lambda_: float) -> List[Hit]:
     if not candidates:
         return []
@@ -227,7 +216,6 @@ def mmr_select(query: str, candidates: List[Hit], model: SentenceTransformer, to
     return [candidates[i] for i in selected]
 
 
-# ===================== MAIN =====================
 
 def hybrid_search(query: str, topn: int = DEFAULT_TOPN) -> List[Hit]:
     model = SentenceTransformer(EMBED_MODEL_NAME, device=_device())
