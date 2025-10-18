@@ -30,16 +30,20 @@ def find_similar_and_laws(request: SimilarRequest) -> SimilarResponse:
             sonuc=_as_text(p.get("sonuc")),
             gerekce=_as_text(p.get("gerekce")) if request.include_summaries else None,
             karar=_as_text(p.get("karar")) if request.include_summaries else None,
+            karar_metni=_as_text(
+                p.get("karar_metni_meta") or p.get("karar_metni") or p.get("karar_preview")
+            ),  # 🔹 tam karar metnini ekliyoruz
             hikaye=_as_text(p.get("hikaye")) if request.include_summaries else None,
             similarity_score=round(float(h.score_norm), 4),
             source=h.source,
         )
         similar_cases.append(case)
 
+    # basit kanun tespiti (ileride BM25+graph ile genişletilebilir)
     related_laws: List[LawItem] = []
     law_terms = ("İş Kanunu", "HMK", "TBK", "TMK", "Borçlar Kanunu")
     for c in similar_cases:
-        text_fields = [c.gerekce, c.karar, c.hikaye]
+        text_fields = [c.karar_metni, c.karar, c.gerekce, c.hikaye]
         text = " ".join([t for t in text_fields if t])
         for term in law_terms:
             if term.lower() in text.lower():

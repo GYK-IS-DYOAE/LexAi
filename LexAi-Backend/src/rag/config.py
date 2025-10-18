@@ -14,7 +14,6 @@ OS_USER = None      # Güvenlik kapalıysa kullanıcı/şifre boş kalır
 OS_PASS = None
 OS_INDEX = "lexai_cases"
 
-
 QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 QDRANT_COLLECTION = "lexai_cases"
@@ -23,18 +22,18 @@ QDRANT_COLLECTION = "lexai_cases"
 EMBED_MODEL_NAME = "BAAI/bge-m3"   # Sentence embedding modeli
 
 
-MAX_PASSAGE_CHARS = 1200           # Her pasajdan LLM'e en fazla kaç karakter verilecek
+MAX_PASSAGE_CHARS = 5000           # Her pasajdan LLM'e en fazla kaç karakter verilecek
 MAX_TOTAL_PASSAGES = 8             # LLM'e en fazla kaç pasaj gönderilecek
 
 
 
 TOP_K_OS = 50                      # OpenSearch’ten kaç sonuç alınsın
 TOP_K_QDRANT = 50                  # Qdrant’tan kaç sonuç alınsın
-MMR_LAMBDA = 0.5                   # MMR denge katsayısı (0=çeşitlilik, 1=benzerlik)
+MMR_LAMBDA = 0.7                   # MMR denge katsayısı (0=çeşitlilik, 1=benzerlik)
 DEFAULT_TOPN = 8                   # Kullanıcıya gösterilecek sonuç sayısı
 
 
 LLM_BACKEND = "ollama"             # "ollama", "openai", "vllm" vb. olabilir
-LLM_MODEL_NAME = "qwen:7b"         # Ollama'da yüklü model adı
+LLM_MODEL_NAME = "qwen2.5:7b-instruct"         # Ollama'da yüklü model adı
 LLM_BASE_URL = "http://localhost:11434"  # LLM API endpoint
 LLM_TIMEOUT = 60                   # İstek zaman aşımı (saniye)

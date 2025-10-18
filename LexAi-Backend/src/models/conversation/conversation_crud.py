@@ -4,7 +4,9 @@ from uuid import UUID
 
 from src.models.conversation.session_model import ConversationSession
 from src.models.conversation.message_model import Message, SenderType
-
+from sqlalchemy.orm import Session
+from sqlalchemy import select, desc
+from src.models.conversation.message_model import Message
 
 def create_session(db: Session, user_id: UUID, title: str = "Yeni Sohbet"):
     session = ConversationSession(user_id=user_id, title=title)
@@ -111,3 +113,17 @@ def get_sessions_by_user(db: Session, user_id: str):
         .order_by(ConversationSession.created_at.desc())
         .all()
     )
+
+def get_last_messages(db: Session, session_id: str, limit: int = 6):
+    """
+    Verilen session_id'ye ait son mesajları (user + assistant)
+    sıralı biçimde döndürür.
+    """
+    stmt = (
+        select(Message)
+        .where(Message.session_id == session_id)
+        .order_by(desc(Message.created_at))
+        .limit(limit)
+    )
+    results = db.scalars(stmt).all()
+    return list(reversed(results))

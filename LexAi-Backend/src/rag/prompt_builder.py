@@ -1,69 +1,98 @@
 from typing import List, Dict
+import re
 from src.rag.config import MAX_PASSAGE_CHARS, MAX_TOTAL_PASSAGES
 
 SYSTEM_PROMPT = """
-#[ROLÜN]
-Sen LexAI’nin hukuk asistanısın. Türk mahkeme kararlarını ve mevzuatı temel alarak kullanıcıya güvenilir, sade ve anlaşılır açıklamalar yaparsın.  
-Amacın, kullanıcıyı bilgilendirmek ve gerektiğinde bir sonraki adıma yönlendirmektir.
+Sen LexAI’nin hukuk asistanısın. Kullanıcının sorularına yalnızca Türk hukuku çerçevesinde yanıt ver. 
+Cevaplar **sadece Türkçe** olacak, başka dil kullanamazsın. 
+Hukuki olmayan sorulara kibarca reddet ve yanıt verme. 
 
-#[GÖREVİN]
-- Kullanıcının sorduğu soruya, verilen pasajlardan **genelleme yaparak** cevap ver.  
-- **Mahkeme, tarih veya dosya adı** belirtme. “Bölge Adliye Mahkemesi” ya da “Yargıtay” gibi ifadeler kullanma; onun yerine **“mahkemeler genellikle”** veya **“yargı mercileri çoğunlukla”** de.  
-- Cevabın akıcı bir metin olarak gelsin; başlık, madde veya tablo kullanma (yalnızca gerçekten faydalıysa kısa maddeler olabilir).  
-- Cümleler kısa ama anlam olarak dolu olsun; yüzeysel yanıtlar verme.  
-- Gerektiğinde örnek ilkeleri sadeleştirerek açıkla: “Genellikle şu durumlarda nafaka artışı uygun görülür.”  
-- Son kısımda kullanıcıya yönlendirme yap:  
-  “Benzer davaları incelemek ister misiniz?” veya  
-  “Bu konuda bir hukuk uzmanına danışmanız yararlı olabilir.”  
+Yanıt kuralları:
+- Cümleler mantıklı, akıcı, Türkçe dilbilgisine uygun olacak.
+- Gereksiz sembol veya anlamsız kelime birleşimleri (ör: asdf, ??, ..) kullanma.
+- Kanun/madde geçiyorsa sadece anlamını açıkla, metni kopyalama.
+- Bilgi yetersizse: “Mevcut bilgiler sınırlı olsa da genel uygulama şöyledir…” diyebilirsin.
+- Bağlayıcı hukuki tavsiye verme; sadece bilgilendirici ol.
 
-#[KANIT ZAYIFSA]
-- Eğer pasajlar yeterli bilgi sunmuyorsa, bunu açıkça belirt (“Mevcut bilgiler sınırlı olsa da genel uygulama şöyledir…”).  
-- Bu durumda genel ilkelere dayanarak güvenli bir açıklama yap.  
+Yanıt yapısı:
+1. Konunun genel çerçevesi
+2. Olayın değerlendirilmesi
+3. İlgili yasal çerçeve (varsa)
+4. Kısa sonuç veya yönlendirme
 
-#[YASA MADDELERİ]
-- Pasajlarda geçen kanun veya madde varsa, kısa ve sade biçimde açıkla:  
-  “Türk Medeni Kanunu’nun 175. maddesi, boşanma sonrası yoksulluğa düşecek eşe nafaka bağlanabileceğini düzenler.”  
-- Kanun metnini kopyalama; sadece anlamını açıkla.  
-- Belge numarası, karar tarihi veya taraf bilgisi verme.  
-
-#[ÜSLUP]
-- Sadece Türkçe yaz. Bu prompt’un tamamı Türkçedir.
-- Samimi ama profesyonel, öğretici bir ton kullan.  
-- Kısa paragraflardan oluşan akıcı bir anlatım tercih et.  
-- Gerektiğinde maddelendirme yapabilirsin ama cevabı tamamen listeye dönüştürme.  
-- Gereksiz tekrar ve resmi dil kullanımından kaçın.  
-- Doğal bir kapanış yapabilirsin (“Teşekkürler, umarım faydalı olmuştur.”).  
-
-#[İÇERİK AKIŞI]
-Cevabın doğal paragraf yapısında olmalı;  
-- Önce konunun genel çerçevesi,  
-- Ardından değerlendirme ve olası sonuçlar,  
-- Varsa ilgili yasa maddesinin kısa açıklaması,  
-- Son olarak yol gösterici bir kapanış.  
-- Yalnızca gerekliyse maddelendirme yap. Her cevabı liste gibi yazma; paragraflar öncelikli olsun.
-
-
-#[HEDEF]
-Kullanıcıya:  
-1. Anlamlı, bağlamsal bir açıklama,  
-2. Gerekçeli, dengeli bir değerlendirme,  
-3. Öğretici ve yönlendirici bir sonuç sun.  
-
-Cevabın kullanıcıyı bilgilendirsin, ancak hukuki tavsiye verme.
+Ek kurallar:
+- Kullanıcı selamlaşırsa (“merhaba”, “selam”, “nasılsın”) kibarca yanıt ver: “Merhaba, size nasıl yardımcı olabilirim?”
+- Kullanıcı anlamsız semboller veya eksik şeyler yazarsa: “Sorunuzu tam olarak anlayamadım, isterseniz hukuki bir konuda yardımcı olabilirim.” de.
+- Hukuk dışı bir konu sorarsa: “Ben bir hukuk asistanıyım, hukuk dışı konularda bilgi veremem.” diye yanıtla.
+- Cevapta **her zaman tam karar metinlerinden** yararlan.
 """
 
-def build_user_prompt(query: str, passages: List[Dict]) -> str:
+GREETINGS_RE = re.compile(r"^\s*(merhaba|selam|günaydın|iyi günler|iyi akşamlar|nasılsın)\b", re.IGNORECASE)
+NONSENSE_RE = re.compile(r"^[\?\*\.\,]+$")
+
+
+def _sanitize_user_query(q: str) -> str:
+    """Kullanıcı sorgusunu temizle."""
+    if not q:
+        return ""
+    q = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ\.\,\?\!]+", " ", q)
+    q = re.sub(r"\s+", " ", q).strip()
+    return q
+
+
+def build_user_prompt(query: str, passages: List, conversation_history: List[Dict] | None = None) -> str:
     """
-    Kullanıcı sorusu + arka plan pasajları → LLM için kullanıcı prompt'u.
-    Pasajlar sadece bağlam sağlar, örnekleri birebir yansıtmaz.
+    Kullanıcı sorusu + tam karar_metni pasajları + önceki konuşmalar → LLM prompt'u.
+    passages: List[Hit] veya sözlük (retrieve_combined.hybrid_search() sonucu)
+    conversation_history: List[{"user": "...", "assistant": "..."}]
     """
-    lines = [
-        f"SORU:\n{query.strip()}\n",
-        "AŞAĞIDAKİ METİNLERDEN SADECE GENEL İLKELERİ ÇIKAR. TARİH, MAHKEME ADI, TARAF BİLGİSİ YAZMA:\n"
-    ]
-    for i, p in enumerate(passages[:MAX_TOTAL_PASSAGES], 1):
-        raw_text = p.get("text") or ""
-        text = raw_text.strip().replace("\n", " ")[:MAX_PASSAGE_CHARS]
-        lines.append(f"{i}. {text}")
-    lines.append("\nBu bilgileri kullanarak doğal, akıcı ve öğretici bir yanıt ver.")
+    q_clean = _sanitize_user_query(query or "")
+
+    # 🔹 selam, anlamsız veya hukuk dışı içerikler
+    if GREETINGS_RE.match(q_clean):
+        return "Merhaba, size nasıl yardımcı olabilirim?"
+    if NONSENSE_RE.match(q_clean) or len(q_clean) < 2:
+        return "Sorunuzu tam olarak anlayamadım, isterseniz hukuki bir konuda yardımcı olabilirim."
+    if any(w in q_clean.lower() for w in ["yemek", "spor", "film", "müzik", "tarif", "tatil", "oyun"]):
+        return "Ben bir hukuk asistanıyım, hukuk dışı konularda bilgi veremem."
+
+    # 🔹 sistem kuralları
+    lines = [SYSTEM_PROMPT.strip()]
+
+    # 🔹 geçmiş konuşmalar
+    if conversation_history:
+        lines.append("\n--- ÖNCEKİ KONUŞMA BAĞLAMI ---")
+        for turn in conversation_history[-5:]:
+            user_msg = turn.get("user", "").strip()
+            assistant_msg = turn.get("assistant", "").strip()
+            if user_msg:
+                lines.append(f"Kullanıcı: {user_msg}")
+            if assistant_msg:
+                lines.append(f"Asistan: {assistant_msg}")
+
+    # 🔹 mevcut soru
+    lines.append("\n--- GÜNCEL SORU ---")
+    lines.append(q_clean)
+
+    # 🔹 tam karar metinleri (karar_metni)
+    if passages:
+        lines.append("\n--- BENZER DAVALARIN TAM KARAR METİNLERİ ---")
+        for i, p in enumerate(passages[:MAX_TOTAL_PASSAGES], 1):
+            # retrieve_combined.Hit.text_full zaten karar_metni
+            text = ""
+            if hasattr(p, "text_full"):  # Hit objesi
+                text = p.text_full
+            elif isinstance(p, dict):   # dict olarak geldiyse
+                text = p.get("karar_metni") or p.get("text_full") or ""
+            text = (text or "").strip().replace("\n", " ")
+            if text:
+                snippet = text[:MAX_PASSAGE_CHARS]
+                lines.append(f"[{i}] {snippet}")
+
+    # 🔹 model yönlendirmesi
+    lines.append(
+        "\nYukarıdaki tam karar metinleri ve konuşma geçmişini dikkate alarak, "
+        "kullanıcının sorusuna Türkçe, akıcı, bağlama uygun ve öğretici bir hukuki yanıt ver."
+    )
+
     return "\n".join(lines)
