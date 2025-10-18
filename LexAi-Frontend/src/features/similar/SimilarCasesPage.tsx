@@ -132,7 +132,7 @@ export default function SimilarCasesPage() {
             {selectedCase?.karar_metni && (
               <div>
                 <h3 className="font-semibold text-[hsl(var(--lex-primary))]">
-                  Tam Karar Metni
+                  Karar Metni
                 </h3>
                 <p className="text-muted-foreground whitespace-pre-line leading-relaxed">
                   {selectedCase.karar_metni}
