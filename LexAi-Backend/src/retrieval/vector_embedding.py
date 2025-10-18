@@ -1,4 +1,4 @@
-# src/retrieval/embed_berturk_legal.py
+# src/retrieval/embed_bge_m3.py
 # ---------------------------------------------------------------------
 # Windows friendly, STREAMING (no big temp files), single-thread
 # - CUDA varsa kullanır; yoksa CPU
@@ -22,6 +22,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 from qdrant_client.http.exceptions import ResponseHandlingException, UnexpectedResponse
 
+# ================== Config ==================
 INPUT_FILE = "data/interim/balanced_total30k.jsonl"
 
 OUT_DIR = Path("data/processed/embeddings")
@@ -32,19 +33,21 @@ QDRANT_HOST = "localhost"
 QDRANT_PORT = 6333
 QDRANT_GRPC_PORT = 6334
 
-CHUNK_SIZE_RECORDS = 3_000
+CHUNK_SIZE_RECORDS = 3_000       # her 3k kayıt = 1 chunk (CPU/RAM)
 EMB_BATCH_SIZE = 32             
-QDRANT_UPSERT_BATCH = 128        
+QDRANT_UPSERT_BATCH = 128        # 32MB limitine takılmamak için
 
-MODEL_NAME = "KocLab-Bilkent/BERTurk-Legal"
+MODEL_NAME = "BAAI/bge-m3"
 QDRANT_REQUEST_TIMEOUT = 120.0
 UPSERT_MAX_RETRIES = 5
 UPSERT_BACKOFF_BASE = 2.0
 
+# Metin parçalama
 CHUNK_CHAR = 1500
 CHUNK_OVERLAP = 100
 MIN_CHAR = 40
 
+# Depolama/metadata 
 SAVE_TEMP_FILES = False       
 STORE_FULL_TEXT_IN_QDRANT = False
 TEXT_PREVIEW_CHARS = 200        
@@ -56,7 +59,9 @@ def sha1(s: str) -> str:
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
 
 def make_point_id(m: Dict[str, Any]) -> int:
+    """Deterministik 64-bit int ID."""
     base = f"{m.get('doc_id','')}|{m.get('section','')}|{m.get('text_sha1','')}"
+    # SHA1'den ilk 16 hex = 64-bit integer
     return int(hashlib.sha1(base.encode("utf-8")).hexdigest()[:16], 16)
 
 def safe_list(x: Any) -> List:
@@ -83,6 +88,8 @@ def chunk_text(txt: str, size: int = CHUNK_CHAR, overlap: int = CHUNK_OVERLAP) -
 
 def add_text_segment(records: List[str], metas: List[Dict[str,Any]],
                      text: Any, rec: Dict[str,Any], section: str) -> None:
+    """Bölüm metnini (gerekçe/hikaye) parçalara böl ve payload hazırla.
+       Karar metni embed edilmez; preview'ı metadata olarak eklenir."""
     if text is None: return
     karar_full = (rec.get("karar") or rec.get("karar_metni") or "").strip()
     karar_preview = karar_full[:DECISION_PREVIEW_CHARS] if karar_full else None
@@ -232,12 +239,13 @@ def process_and_upload_chunk(model: SentenceTransformer,
         meta_slice = metas[s:s+QDRANT_UPSERT_BATCH]
         points: List[rest.PointStruct] = []
         for m_payload, v in zip(meta_slice, vecs):
-            pid = make_point_id(m_payload)
+            pid = make_point_id(m_payload)  # <- gRPC uyumlu int64 ID
             points.append(rest.PointStruct(id=pid, vector=v.tolist(), payload=m_payload))
         upsert_with_retry(client, points)
 
     print(f"[Upload] Chunk {pack.idx} done")
 
+    # (Opsiyonel) upload başarılıysa geçici dosyaları sil
     if SAVE_TEMP_FILES:
         try:
             (OUT_DIR / f"embeddings_chunk_{pack.idx}.npy").unlink(missing_ok=True)
@@ -249,21 +257,24 @@ def main():
     device = pick_device()
     print(f"→ Using device: {device}")
 
+    # model
     model = SentenceTransformer(MODEL_NAME, device=device)
     vector_size = model.get_sentence_embedding_dimension()
 
+    # qdrant (gRPC)
     client = QdrantClient(
         host=QDRANT_HOST, port=QDRANT_PORT,
         grpc_port=QDRANT_GRPC_PORT, prefer_grpc=True,
         timeout=QDRANT_REQUEST_TIMEOUT,
     )
-    _ = client.get_collections()
+    _ = client.get_collections()  # health check
 
+    # state & collection
     state = load_state()
     ensure_collection(client, vector_size, state)
     next_line = state.get("next_line", 0)
     chunk_idx = state.get("chunk_idx", 0)
-    print(f"Resuming from line {next_line}, chunk {chunk_idx}")
+    print(f"▶ Resuming from line {next_line}, chunk {chunk_idx}")
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -279,8 +290,8 @@ def main():
 
                 rec = json.loads(line)
 
-                add_text_segment(records, metas, rec.get("karar") or rec.get("karar_metni"), rec, "karar")
-
+                add_text_segment(records, metas, rec.get("gerekce"), rec, "gerekce")
+                add_text_segment(records, metas, rec.get("hikaye"),  rec, "hikaye")
 
                 lines_in_chunk += 1
                 if lines_in_chunk == CHUNK_SIZE_RECORDS:
@@ -289,14 +300,17 @@ def main():
                         model, client,
                         ChunkPack(idx=chunk_idx, next_line_after=line_idx+1, records=records, metas=metas)
                     )
+                    # chunk tamamlandı → state ilerlet
                     state["chunk_idx"] = chunk_idx + 1
                     state["next_line"] = line_idx + 1
                     save_state(state)
 
+                    # sıfırla
                     chunk_idx += 1
                     records, metas = [], []
                     lines_in_chunk = 0
 
+            # dosya sonu
             if lines_in_chunk > 0 and records:
                 print(f"[Reader] Chunk {chunk_idx} (final) | records_in_chunk={lines_in_chunk} | segments={len(records)}")
                 process_and_upload_chunk(
@@ -307,7 +321,7 @@ def main():
                 state["next_line"] = line_idx + 1
                 save_state(state)
 
-        print("Done.")
+        print("🎉 Done.")
     except KeyboardInterrupt:
         print("\nInterrupted by user. (Son TAM chunk'a kadar yüklendi)")
     except Exception as e:
