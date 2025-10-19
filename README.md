@@ -214,3 +214,5 @@ Bu yazılım hukuki danışmanlık yerine geçmez; yalnızca destek amaçlıdır
 
 
 ---
+
+<img width="1513" height="891" alt="1 1" src="https://github.com/user-attachments/assets/2b29b1c9-7e8e-41cb-955b-9ceb686a28f0" />
