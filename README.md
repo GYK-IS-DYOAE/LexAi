@@ -38,6 +38,7 @@ Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındı
 ### Backend
 
 'cd LexAi-Backend'
+
 'python -m venv .venv'
 #### Windows:
 .venv\Scripts\activate
@@ -47,8 +48,8 @@ Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındı
 pip install -r requirements.txt
 
 #### Postgres
-POSTGRES_USER=lexai
-POSTGRES_PASSWORD=lexai123
+POSTGRES_USER=***
+POSTGRES_PASSWORD=***
 POSTGRES_DB=lexai_db
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
