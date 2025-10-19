@@ -7,43 +7,35 @@ SYSTEM_PROMPT = """
 #[ROL]
 Sen bir Türk hukuk asistanısın. Türk mahkeme kararlarını ve mevzuatı temel alarak kullanıcıya güvenilir, sade ve anlaşılır açıklamalar yaparsın.  
 Amacın, kullanıcıyı bilgilendirmek ve gerektiğinde bir sonraki adıma yönlendirmektir.
-Sadece Türkçe cevaplara vereceksin. 
+Sadece Türkçe cevap vereceksin. 
 
 #[GÖREV]
-- Kullanıcının sorduğu soruya, verilen pasajlardan **genelleme yaparak** cevap ver.  
-- **Mahkeme, tarih veya dosya adı** belirtme. “Bölge Adliye Mahkemesi” ya da “Yargıtay” gibi ifadeler kullanma; onun yerine **“mahkemeler genellikle”** veya **“yargı mercileri çoğunlukla”** de.  
-- Cevabın akıcı bir metin olarak gelsin; başlık, madde veya tablo kullanma (yalnızca gerçekten faydalıysa kısa maddeler olabilir).  
-- Cümleler kısa ama anlam olarak dolu olsun; yüzeysel yanıtlar verme.  
-- Gerektiğinde örnek ilkeleri sadeleştirerek açıkla: “Genellikle şu durumlarda nafaka artışı uygun görülür.”  
-- Son kısımda kullanıcıya yönlendirme yap:  
-  “Benzer davaları incelemek ister misiniz?” veya  
-  “Bu konuda bir hukuk uzmanına danışmanız yararlı olabilir.”  
+- Kullanıcının sorduğu soruya, verilen pasajlardan genelleme yaparak cevap ver.  
+- Mahkeme, tarih veya dosya adı belirtme. “Bölge Adliye Mahkemesi” ya da “Yargıtay” gibi ifadeler kullanma; onun yerine “mahkemeler genellikle” veya “yargı mercileri çoğunlukla” de.  
+- Cevabın akıcı bir metin olarak gelsin; kısa, açıklayıcı ve tekrarsız olsun.  
+- Gerektiğinde örnek ilkeleri sadeleştirerek açıkla.  
+- Sonunda kullanıcıyı yalnızca gerekiyorsa yönlendir (“Benzer davaları inceleyebilirsiniz.” gibi).  
 
 #[KANIT ZAYIFSA]
 - Eğer pasajlar yeterli bilgi sunmuyorsa, bunu açıkça belirt (“Mevcut bilgiler sınırlı olsa da genel uygulama şöyledir…”).  
 - Bu durumda genel ilkelere dayanarak güvenli bir açıklama yap.  
 
 #[YASA MADDELERİ]
-- Pasajlarda geçen kanun veya madde varsa, kısa ve sade biçimde açıkla:  
-  “Türk Medeni Kanunu’nun 175. maddesi, boşanma sonrası yoksulluğa düşecek eşe nafaka bağlanabileceğini düzenler.”  
+- Pasajlarda geçen kanun veya madde varsa, kısa ve sade biçimde açıkla.  
 - Kanun metnini kopyalama; sadece anlamını açıkla.  
 - Belge numarası, karar tarihi veya taraf bilgisi verme.  
 
 #[ÜSLUP]
-- Sadece Türkçe yaz. Bu prompt’un tamamı Türkçedir.
+- Doğrudan konuya gir, selamlama veya kapanış cümlesi kullanma (“merhaba”, “teşekkürler” vb. yok).  
 - Samimi ama profesyonel, öğretici bir ton kullan.  
 - Kısa paragraflardan oluşan akıcı bir anlatım tercih et.  
 - Gerektiğinde maddelendirme yapabilirsin ama cevabı tamamen listeye dönüştürme.  
-- Gereksiz tekrar ve resmi dil kullanımından kaçın.  
-- Doğal bir kapanış yapabilirsin (“Teşekkürler, umarım faydalı olmuştur.”).  
+- Gereksiz tekrar ve kalıp ifadelerden kaçın.  
 
-#[İÇERİK AKIŞI]
-Cevabın doğal paragraf yapısında olmalı;  
-- Önce konunun genel çerçevesi,  
-- Ardından değerlendirme ve olası sonuçlar,  
-- Varsa ilgili yasa maddesinin kısa açıklaması,  
-- Son olarak yol gösterici bir kapanış.  
-- Yalnızca gerekliyse maddelendirme yap. Her cevabı liste gibi yazma; paragraflar öncelikli olsun.
+#[KONUŞMA BAĞLAMI]
+Eğer kullanıcıyla önceki konuşmalardan bir bağlam verildiyse (“--- ÖNCEKİ KONUŞMA BAĞLAMI ---” başlığı altında),
+bu geçmiş konuşmaları dikkate alarak, yeni sorunun önceki konuyla bağlantısını koruyacak şekilde yanıt ver.
+Geçmiş konu tamamen alakasızsa, yeni konuyu bağımsız ele al.
 
 #[HEDEF]
 Kullanıcıya:  
@@ -52,20 +44,20 @@ Kullanıcıya:
 3. Öğretici ve yönlendirici bir sonuç sun.  
 
 #[EK KURALLAR]
-- Kullanıcı selamlaşırsa (“merhaba”, “selam”, “nasılsın”) kibarca yanıt ver: “Merhaba, size nasıl yardımcı olabilirim?”
-- Kullanıcı anlamsız semboller veya eksik şeyler yazarsa: “Sorunuzu tam olarak anlayamadım, isterseniz hukuki bir konuda yardımcı olabilirim.” de.
-- Hukuk dışı bir konu sorarsa: “Ben bir hukuk asistanıyım, hukuk dışı konularda bilgi veremem.” diye yanıtla.
-- Cevapta **her zaman tam karar metinlerinden** yararlan.
+- Anlamsız veya hukuk dışı konularda kibarca yönlendir (“Bu konu hukuki değil, bu nedenle yanıt veremem.”).  
+- Cevapta her zaman karar metinlerinden yararlan, ama doğrudan alıntı yapma.
 
 Cevabın kullanıcıyı bilgilendirsin, ancak hukuki tavsiye verme.
 """
+
 GREETINGS_RE = re.compile(r"^\s*(merhaba|selam|günaydın|iyi günler|iyi akşamlar|nasılsın)\b", re.IGNORECASE)
-NONSENSE_RE  = re.compile(r"^[\?\*\.\,]+$")
-# Basit Türkçe olmayan metin yakalayıcı (yalın sezgi)
+NONSENSE_RE = re.compile(r"^[\?\*\.\,]+$")
 NON_TURKISH_RE = re.compile(r"[A-Za-z]{3,}")
+
 
 def _sha1(s: str) -> str:
     return hashlib.sha1((s or "").encode("utf-8")).hexdigest()
+
 
 def _sanitize_user_query(q: str) -> str:
     if not q:
@@ -73,55 +65,81 @@ def _sanitize_user_query(q: str) -> str:
     q = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ\.\,\?\!]+", " ", q)
     return re.sub(r"\s+", " ", q).strip()
 
+
+def _text_fields(payload: Dict) -> Tuple[str, str]:
+    text_full = (
+        payload.get("karar_metni")
+        or payload.get("karar_metni_meta")
+        or payload.get("karar_metni_raw")
+        or payload.get("karar")
+        or payload.get("text")
+        or payload.get("full_text")
+        or ""
+    ).strip()
+    text_repr = (payload.get("karar_preview") or text_full[:400]).strip()
+    if len(text_full) > MAX_PASSAGE_CHARS:
+        text_full = text_full[:MAX_PASSAGE_CHARS]
+    return text_repr, text_full
+
+
 def build_user_prompt(
     query: str,
     passages: List[Dict],
     conversation_history: Optional[List[Dict]] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
-    """
-    Dönüş: (user_prompt, early_answer)
-    early_answer dolu ise LLM'i çağırma; doğrudan onu gönder.
-    """
     q_clean = _sanitize_user_query(query or "")
 
-    # Erken dönüşler
     if GREETINGS_RE.match(q_clean):
-        return None, "Merhaba"
+        return None, "Sizi dinliyorum, sorunuz nedir?"
     if NONSENSE_RE.match(q_clean) or len(q_clean) < 2:
-        return None, "Sorunuzu tam olarak anlayamadım, isterseniz hukuki bir konuda yardımcı olabilirim."
-    # Türkçe değil gibi görünüyorsa (ve içinde Türkçe karakter de yoksa) reddet
+        return None, "Sorunuzu tam olarak anlayamadım, biraz daha açık yazar mısınız?"
     if NON_TURKISH_RE.search(q_clean) and not re.search(r"[çğıöşüÇĞİÖŞÜ]", q_clean):
         return None, "Üzgünüm, yalnızca Türkçe dilinde yanıt verebilirim."
     if any(w in q_clean.lower() for w in ["yemek", "spor", "film", "müzik", "tarif", "tatil", "oyun"]):
-        return None, "Ben bir hukuk asistanıyım, hukuk dışı konularda bilgi veremem."
+        return None, "Bu konu hukuk kapsamına girmiyor."
 
-    lines: List[str] = []
+    parts: List[str] = []
 
-    # Konuşma bağlamı (son 5 tur)
+    # --- geçmiş konuşmaları chat biçiminde ekle ---
     if conversation_history:
-        lines.append("--- ÖNCEKİ KONUŞMA BAĞLAMI ---")
-        for turn in conversation_history[-5:]:
-            u = (turn.get("user") or "").strip()
-            a = (turn.get("assistant") or "").strip()
-            if u: lines.append(f"Kullanıcı: {u}")
-            if a: lines.append(f"Asistan: {a}")
+        for turn in conversation_history[-4:]:
+            if "user" in turn and turn["user"]:
+                parts.append(f"<|im_start|>user\n{turn['user']}<|im_end|>")
+            elif "assistant" in turn and turn["assistant"]:
+                parts.append(f"<|im_start|>assistant\n{turn['assistant']}<|im_end|>")
 
-    # Güncel soru
-    lines.append("\n--- GÜNCEL SORU ---")
-    lines.append(q_clean)
+    # --- güncel kullanıcı sorusu ---
+    parts.append(f"<|im_start|>user\n{q_clean}<|im_end|>")
 
-    # Pasajlar (tam karar metni) — eşsizleştir + sınırla + kırp
-    uniq = []
-    seen = set()
+    # --- benzer dava başlıkları ---
+    similar_titles = []
     for p in passages or []:
-        txt = (p.get("karar_metni") or p.get("text_full") or "").strip()
-        if not txt:
+        title = (
+            p.get("dava_turu")
+            or p.get("karar_ozeti")
+            or p.get("karar")
+            or p.get("sonuc")
+            or p.get("karar_preview")
+        )
+        if title:
+            similar_titles.append(str(title).strip())
+
+    if similar_titles:
+        parts.append("<|im_start|>system\n--- BENZER DAVALARIN KISA BAŞLIKLARI ---")
+        for i, t in enumerate(similar_titles[:8], 1):
+            parts.append(f"{i}. {t}")
+        parts.append("<|im_end|>")
+
+    # --- tam karar metinleri ---
+    uniq, seen = [], set()
+    for p in passages or []:
+        _, full_text = _text_fields(p)
+        if not full_text:
             continue
-        key = _sha1(txt)
-        if key in seen:
-            continue
-        seen.add(key)
-        uniq.append(txt)
+        key = _sha1(full_text)
+        if key not in seen:
+            seen.add(key)
+            uniq.append(full_text)
 
     print(f"[DEBUG] build_user_prompt → Toplam {len(passages)} pasaj geldi.")
     print(f"[DEBUG] Filtre sonrası {len(uniq)} eşsiz pasaj kaldı.")
@@ -130,21 +148,21 @@ def build_user_prompt(
     else:
         print("[DEBUG] Hiç karar metni bulunamadı.")
 
-
     if uniq:
-        lines.append("\n--- BENZER DAVALARIN TAM KARAR METİNLERİ ---")
+        parts.append("<|im_start|>system\n--- BENZER DAVALARIN TAM KARAR METİNLERİ ---")
         cap_n = max(1, int(MAX_TOTAL_PASSAGES))
         cap_c = max(200, int(MAX_PASSAGE_CHARS))
         for i, txt in enumerate(uniq[:cap_n], 1):
             snippet = txt.replace("\n", " ")[:cap_c]
-            lines.append(f"[{i}] {snippet}")
+            parts.append(f"[{i}] {snippet}")
+        parts.append("<|im_end|>")
     else:
-        lines.append("\n--- BENZER DAVALARIN TAM KARAR METİNLERİ ---")
-        lines.append("[bilgi yok]")
+        parts.append("<|im_start|>system\n--- BENZER DAVALARIN TAM KARAR METİNLERİ ---\n[bilgi yok]<|im_end|>")
 
-    # Yönlendirme
-    lines.append(
-        "\nYukarıdaki bağlamı dikkate alarak, belirtilen yanıt yapısını izleyen, kısa ve öğretici bir hukuki yanıt üret."
+    # --- talimat ---
+    parts.append(
+        "<|im_start|>system\nYukarıdaki konuşma ve karar metinlerine dayanarak, geçmiş diyalogla tutarlı, "
+        "tekrarsız ve öğretici bir hukuki açıklama oluştur.<|im_end|>\n<|im_start|>assistant\n"
     )
 
-    return "\n".join(lines), None
+    return "\n".join(parts), None
