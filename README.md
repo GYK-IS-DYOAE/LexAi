@@ -35,38 +35,38 @@ Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındı
 
 ### A. Geliştirme Ortamı (Local)
 
-#### Backend
+### Backend
 
 cd LexAi-Backend
 python -m venv .venv
-### Windows:
+#### Windows:
 .venv\Scripts\activate
-### Linux/Mac:
+#### Linux/Mac:
  source .venv/bin/activate
 
 pip install -r requirements.txt
 
-### Postgres
+#### Postgres
 POSTGRES_USER=lexai
 POSTGRES_PASSWORD=lexai123
 POSTGRES_DB=lexai_db
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 
-### Vector / Search
+#### Vector / Search
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 OS_HOST=localhost
 OS_PORT=9200
 
-### Ollama
+#### Ollama
 OLLAMA_HOST=http://localhost:11434
 
-### Auth
+#### Auth
 JWT_SECRET_KEY=change_me
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
-### Veritabanını başlat 
+#### Veritabanını başlat 
 python -m src.core.init_db Uvicorn ile çalıştır 
 uvicorn src.main:app --reload --port 8000 # Swagger: http://localhost:8000/docs Frontend
 
@@ -105,6 +105,8 @@ ollama pull qwen2.5:7b-instruct
 #### ollama pull llama3
 #### ollama pull mistral
 
+---
+
 ## 4) Embedding ve İndeksleme (Retrieval Hazırlığı)
 
 1) Embedding üret
@@ -117,6 +119,8 @@ python -m src.retrieval.index_opensearch
 3) Hybrid test
 python -m src.retrieval.retrieve_combined --query "işe iade davası"
 Not: src/rag/config.py içindeki EMBED_MODEL_NAME, TOP_K_OS, TOP_K_QDRANT, MMR_LAMBDA ve servis host/port değerlerini projene göre ayarla.
+
+---
 
 ## 5) API Uçları (Özet)
 Yöntem	Yol	Açıklama	Auth
@@ -132,6 +136,7 @@ curl -X POST http://localhost:8000/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"test@lexai.ai","password":"secret"}'
 
+---
 
 ## 6) Admin Paneli (FE)
 UserList.tsx: Kullanıcıları listeler (rol, e-posta, oluşturulma tarihi…).
@@ -145,6 +150,7 @@ PrivateLayout.tsx: Yetkili görünümü; sabit sidebar + üst bar.
 SideBar.tsx: Chat, Benzer Davalar, Admin ve Ayarlar hızlı erişim.
 
 ThemeToggle.tsx: Koyu/açık tema.
+---
 
 ## 7) Güvenlik ve Kimlik Doğrulama
 JWT: /auth/login dönen token’ı localStorage’da tut; tüm isteklerde Authorization: Bearer <token>.
@@ -152,6 +158,8 @@ JWT: /auth/login dönen token’ı localStorage’da tut; tüm isteklerde Author
 Role: user, admin gibi rollerle Admin paneline erişim kısıtlanır.
 
 CORS: FE/BE farklı origin ise CORSMiddleware ayarlı olmalı.
+
+---
 
 ## 8) Dağıtım (Ubuntu 22.04 LTS Öneri)
 Gereksinimler
@@ -166,6 +174,8 @@ Reverse Proxy: Nginx server_name domainine yönlendir; HTTPS için Certbot.
 Kalıcı Veri: volumes: ile postgres_data, qdrant_data, os_data, ollama_models gibi persistent volume’lar.
 
 Güncelleme: Zero-downtime için docker-compose pull && docker-compose up -d.
+
+---
 
 ## 9) Sorun Giderme
 OpenSearch max virtual memory areas vm.max_map_count:
@@ -183,6 +193,8 @@ SQLAlchemy first()/session hataları: DB oturumu Depends(get_db) ile her istek i
 
 CORS: FE domaini allow_origins’te listeli mi?
 
+---
+
 ## 10) Geliştirme İpuçları
 Windows/WSL: OpenSearch için vm.max_map_count WSL’de de gerekir.
 
@@ -193,6 +205,8 @@ MMR: MMR_LAMBDA değerini 0.1–0.7 aralığında test et; çeşitlilik/ilişkil
 Chunking: MAX_PASSAGE_CHARS ile pasaj uzunluğunu hataya düşmeyecek şekilde sınırla.
 
 Prompt: prompt_builder.py yanıt biçimini kullanıcı-dostu yapar; JSON değil, doğal metin.
+
+---
 
 ## 11) Lisans
 MIT License © 2025 — LexAI.
