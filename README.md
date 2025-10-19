@@ -37,8 +37,8 @@ Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındı
 
 ### Backend
 
-cd LexAi-Backend
-python -m venv .venv
+'cd LexAi-Backend'
+'python -m venv .venv'
 #### Windows:
 .venv\Scripts\activate
 #### Linux/Mac:
@@ -124,12 +124,12 @@ Not: src/rag/config.py içindeki EMBED_MODEL_NAME, TOP_K_OS, TOP_K_QDRANT, MMR_L
 
 ## 5) API Uçları (Özet)
 Yöntem	Yol	Açıklama	Auth
-POST	/auth/register	Kullanıcı kaydı	❌
-POST	/auth/login	JWT token al	❌
-GET	/users/me	Aktif kullanıcı	✅
-POST	/ask	RAG cevabı üret	✅
-POST	/feedback	Geri bildirim oluştur	✅
-GET	/similar_cases	Benzer dava listesi	✅
+POST	/auth/register	Kullanıcı kaydı	
+POST	/auth/login	JWT token al	
+GET	/users/me	Aktif kullanıcı	
+POST	/ask	RAG cevabı üret	
+POST	/feedback	Geri bildirim oluştur	
+GET	/similar_cases	Benzer dava listesi	
 
 Örnek:
 curl -X POST http://localhost:8000/auth/login \
