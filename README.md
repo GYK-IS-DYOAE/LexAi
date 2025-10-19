@@ -36,7 +36,7 @@ Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındı
 ### A. Geliştirme Ortamı (Local)
 
 #### Backend
-```bash
+
 cd LexAi-Backend
 python -m venv .venv
 # Windows:
@@ -46,8 +46,6 @@ python -m venv .venv
 
 pip install -r requirements.txt
 
-### `.env` (örnek)
-```env
 # Postgres
 POSTGRES_USER=lexai
 POSTGRES_PASSWORD=lexai123
@@ -107,7 +105,7 @@ ollama pull qwen2.5:7b-instruct
 # ollama pull llama3
 # ollama pull mistral
 
-## 7) Embedding ve İndeksleme (Retrieval Hazırlığı)
+## 4) Embedding ve İndeksleme (Retrieval Hazırlığı)
 
 1) Embedding üret
 # veriyi oku (örn. data/interim/*.jsonl) → Qdrant’a gönder
@@ -120,7 +118,7 @@ python -m src.retrieval.index_opensearch
 python -m src.retrieval.retrieve_combined --query "işe iade davası"
 Not: src/rag/config.py içindeki EMBED_MODEL_NAME, TOP_K_OS, TOP_K_QDRANT, MMR_LAMBDA ve servis host/port değerlerini projene göre ayarla.
 
-8) API Uçları (Özet)
+## 5) API Uçları (Özet)
 Yöntem	Yol	Açıklama	Auth
 POST	/auth/register	Kullanıcı kaydı	❌
 POST	/auth/login	JWT token al	❌
@@ -135,7 +133,7 @@ curl -X POST http://localhost:8000/auth/login \
   -d '{"email":"test@lexai.ai","password":"secret"}'
 
 
-9) Admin Paneli (FE)
+## 6) Admin Paneli (FE)
 UserList.tsx: Kullanıcıları listeler (rol, e-posta, oluşturulma tarihi…).
 
 FeedbackList.tsx: Sohbet geri bildirimlerini listeler/inceletir.
@@ -148,14 +146,14 @@ SideBar.tsx: Chat, Benzer Davalar, Admin ve Ayarlar hızlı erişim.
 
 ThemeToggle.tsx: Koyu/açık tema.
 
-10) Güvenlik ve Kimlik Doğrulama
+## 7) Güvenlik ve Kimlik Doğrulama
 JWT: /auth/login dönen token’ı localStorage’da tut; tüm isteklerde Authorization: Bearer <token>.
 
 Role: user, admin gibi rollerle Admin paneline erişim kısıtlanır.
 
 CORS: FE/BE farklı origin ise CORSMiddleware ayarlı olmalı.
 
-11) Dağıtım (Ubuntu 22.04 LTS Öneri)
+## 8) Dağıtım (Ubuntu 22.04 LTS Öneri)
 Gereksinimler
 
 sudo apt update
@@ -169,7 +167,7 @@ Kalıcı Veri: volumes: ile postgres_data, qdrant_data, os_data, ollama_models g
 
 Güncelleme: Zero-downtime için docker-compose pull && docker-compose up -d.
 
-12) Sorun Giderme
+## 9) Sorun Giderme
 OpenSearch max virtual memory areas vm.max_map_count:
 
 bash
@@ -185,7 +183,7 @@ SQLAlchemy first()/session hataları: DB oturumu Depends(get_db) ile her istek i
 
 CORS: FE domaini allow_origins’te listeli mi?
 
-13) Geliştirme İpuçları
+## 10) Geliştirme İpuçları
 Windows/WSL: OpenSearch için vm.max_map_count WSL’de de gerekir.
 
 State/Logs: data/processed/embeddings/state.json gibi dosyalar embed ilerlemesini tutar.
@@ -196,7 +194,7 @@ Chunking: MAX_PASSAGE_CHARS ile pasaj uzunluğunu hataya düşmeyecek şekilde s
 
 Prompt: prompt_builder.py yanıt biçimini kullanıcı-dostu yapar; JSON değil, doğal metin.
 
-14) Lisans
+## 11) Lisans
 MIT License © 2025 — LexAI.
 Bu yazılım hukuki danışmanlık yerine geçmez; yalnızca destek amaçlıdır.
 
