@@ -42,7 +42,7 @@ python -m venv .venv
 # Windows:
 .venv\Scripts\activate
 # Linux/Mac:
-# source .venv/bin/activate
+ source .venv/bin/activate
 
 pip install -r requirements.txt
 
@@ -66,10 +66,10 @@ OLLAMA_HOST=http://localhost:11434
 JWT_SECRET_KEY=change_me
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
-
-Veritabanını başlat 
+# Veritabanını başlat 
 python -m src.core.init_db Uvicorn ile çalıştır 
 uvicorn src.main:app --reload --port 8000 # Swagger: http://localhost:8000/docs Frontend
+
 
 #### Frontend
 
@@ -77,7 +77,7 @@ cd ../LexAi-Frontend
 
 npm install
 npm run dev
-# http://localhost:5173
+#### http://localhost:5173
 lib/api.ts içinde baseURL ve token ekleme örneği:
 
 import axios from "axios";
@@ -101,9 +101,9 @@ sudo sysctl -w vm.max_map_count=262144
 Ollama modelleri:
 
 ollama pull qwen2.5:7b-instruct
-# opsiyonel:
-# ollama pull llama3
-# ollama pull mistral
+#### opsiyonel:
+#### ollama pull llama3
+#### ollama pull mistral
 
 ## 4) Embedding ve İndeksleme (Retrieval Hazırlığı)
 
