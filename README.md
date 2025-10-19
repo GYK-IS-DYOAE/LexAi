@@ -182,8 +182,6 @@ Güncelleme: Zero-downtime için docker-compose pull && docker-compose up -d.
 ## 9) Sorun Giderme
 OpenSearch max virtual memory areas vm.max_map_count:
 
-bash
-Kodu kopyala
 sudo sysctl -w vm.max_map_count=262144
 Qdrant bağlantı: 6333/6334 (REST/GRPC) portları açık mı, host doğru mu?
 
