@@ -1,4 +1,46 @@
-numpy>=1.26
-tqdm>=4.66
-sentence-transformers>=3.0.1
-qdrant-client>=1.9.0
+# --- Core backend ---
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+SQLAlchemy==2.0.43
+python-dotenv==1.1.1
+pydantic==2.11.9
+pydantic_core==2.33.2
+passlib==1.7.4
+python-multipart==0.0.20
+python-jose==3.5.0
+email-validator==2.3.0
+
+# --- Database / Vector / Search ---
+psycopg2-binary==2.9.10
+qdrant-client==1.15.1
+opensearch-py==3.0.0
+
+# --- Machine Learning / NLP ---
+sentence-transformers==5.1.1
+transformers==4.57.0
+huggingface-hub==0.35.3
+torch
+torchvision
+torchaudio
+scikit-learn==1.7.2
+scipy==1.16.2
+numpy==2.1.2
+pandas==2.3.3
+tqdm==4.67.1
+
+# --- Utility / Helpers ---
+requests==2.32.5
+PyYAML==6.0.3
+regex==2025.9.18
+typing-extensions==4.12.2
+anyio==4.11.0
+httpx==0.28.1
+grpcio==1.75.1
+protobuf==6.32.1
+fsspec==2024.6.1
+filelock==3.13.1
+sympy==1.13.1
+
+# --- Optional integrations ---
+neo4j==6.0.2   # (kullanıyorsan)
+openai==2.3.0  # (kullanıyorsan)
