@@ -142,23 +142,24 @@ curl -X POST http://localhost:8000/auth/login \
 ## 6) Admin Paneli (FE)
 UserList.tsx: Kullanıcıları listeler (rol, e-posta, oluşturulma tarihi…).
 
-FeedbackList.tsx: Sohbet geri bildirimlerini listeler/inceletir.
+-FeedbackList.tsx: Sohbet geri bildirimlerini listeler/inceletir.
 
-AdminPanel.tsx: Üst seviye panel; modül linkleri ve sayaçlar.
+-AdminPanel.tsx: Üst seviye panel; modül linkleri ve sayaçlar.
 
-PrivateLayout.tsx: Yetkili görünümü; sabit sidebar + üst bar.
+-PrivateLayout.tsx: Yetkili görünümü; sabit sidebar + üst bar.
 
-SideBar.tsx: Chat, Benzer Davalar, Admin ve Ayarlar hızlı erişim.
+-SideBar.tsx: Chat, Benzer Davalar, Admin ve Ayarlar hızlı erişim.
 
-ThemeToggle.tsx: Koyu/açık tema.
+-ThemeToggle.tsx: Koyu/açık tema.
+
 ---
 
 ## 7) Güvenlik ve Kimlik Doğrulama
-JWT: /auth/login dönen token’ı localStorage’da tut; tüm isteklerde Authorization: Bearer <token>.
+**JWT**: /auth/login dönen token’ı localStorage’da tut; tüm isteklerde Authorization: Bearer <token>.
 
-Role: user, admin gibi rollerle Admin paneline erişim kısıtlanır.
+**Role**: user, admin gibi rollerle Admin paneline erişim kısıtlanır.
 
-CORS: FE/BE farklı origin ise CORSMiddleware ayarlı olmalı.
+**CORS**: FE/BE farklı origin ise CORSMiddleware ayarlı olmalı.
 
 ---
 
@@ -210,7 +211,7 @@ Prompt: prompt_builder.py yanıt biçimini kullanıcı-dostu yapar; JSON değil,
 ---
 
 ## 11) Lisans
-MIT License © 2025 — LexAI.
+**MIT License © 2025 — LexAI.**
 Bu yazılım hukuki danışmanlık yerine geçmez; yalnızca destek amaçlıdır.
 
 
