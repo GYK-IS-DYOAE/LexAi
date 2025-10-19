@@ -1,4 +1,4 @@
-# ⚖️ LexAI — Yapay Zeka Destekli Hukuk Asistanı (Monorepo)
+<img width="962" height="325" alt="image" src="https://github.com/user-attachments/assets/5478b681-9b17-41f8-8028-7f01bc6896ad" /># ⚖️ LexAI — Yapay Zeka Destekli Hukuk Asistanı (Monorepo)
 
 LexAI, Türkçe yargı kararları ve mevzuat üzerinde **hybrid arama (OpenSearch + Qdrant)** ve **RAG** (Retrieval-Augmented Generation) yaklaşımıyla çalışan; **FastAPI** tabanlı bir backend ve **Vite + React + TypeScript** tabanlı bir frontend içeren **modüler** bir LegalTech projesidir.  
 Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındırır.
@@ -37,15 +37,14 @@ Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındı
 
 ### Backend
 
-'cd LexAi-Backend'
-
-'python -m venv .venv'
+`cd LexAi-Backend`
+`python -m venv .venv`
 #### Windows:
-.venv\Scripts\activate
+`.venv\Scripts\activate`
 #### Linux/Mac:
- source .venv/bin/activate
+ `source .venv/bin/activate`
 
-pip install -r requirements.txt
+`pip install -r requirements.txt`
 
 #### Postgres
 POSTGRES_USER=***
@@ -68,16 +67,16 @@ JWT_SECRET_KEY=change_me
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
 #### Veritabanını başlat 
-python -m src.core.init_db Uvicorn ile çalıştır 
-uvicorn src.main:app --reload --port 8000 # Swagger: http://localhost:8000/docs Frontend
+`python -m src.core.init_db` Uvicorn ile çalıştır 
+`vicorn src.main:app --reload --port 8000` # Swagger: http://localhost:8000/docs Frontend
 
 
 ### Frontend
 
-cd ../LexAi-Frontend
+`cd ../LexAi-Frontend`
 
-npm install
-npm run dev
+`npm install`
+`npm run dev`
 #### http://localhost:5173
 lib/api.ts içinde baseURL ve token ekleme örneği:
 
@@ -99,7 +98,8 @@ B. Docker (Yerel ya da Sunucu)
 OpenSearch için Linux’ta:
 
 sudo sysctl -w vm.max_map_count=262144
-Ollama modelleri:
+
+###Ollama modelleri:
 
 ollama pull qwen2.5:7b-instruct
 #### opsiyonel:
