@@ -219,8 +219,8 @@ Bu yazılım hukuki danışmanlık yerine geçmez; yalnızca destek amaçlıdır
 <img width="1524" height="868" alt="2" src="https://github.com/user-attachments/assets/368227e0-912a-4998-8ba3-296b837af437" />
 <img width="1520" height="871" alt="3" src="https://github.com/user-attachments/assets/fbea7a03-b360-4882-a975-132750cab9dc" />
 <img width="1490" height="899" alt="4" src="https://github.com/user-attachments/assets/322f12fc-64b3-4dfc-965e-8452c4e94cdc" />
-<img width="1490" height="894" alt="7" src="https://github.com/user-attachments/assets/f5dfe6ad-e0d7-4341-90af-d4a514fff0d8" />
 <img width="1486" height="889" alt="6" src="https://github.com/user-attachments/assets/273e7a2b-1bdd-469f-bd50-def86eef9440" />
+<img width="1490" height="894" alt="7" src="https://github.com/user-attachments/assets/f5dfe6ad-e0d7-4341-90af-d4a514fff0d8" />
 <img width="1482" height="900" alt="5" src="https://github.com/user-attachments/assets/dc5a4a2f-04c5-4b83-bdfb-3ec9b53a76a2" /> 
 
 
