@@ -1,4 +1,4 @@
-<img width="962" height="325" alt="image" src="https://github.com/user-attachments/assets/5478b681-9b17-41f8-8028-7f01bc6896ad" /># ⚖️ LexAI — Yapay Zeka Destekli Hukuk Asistanı (Monorepo)
+# ⚖️ LexAI — Yapay Zeka Destekli Hukuk Asistanı (Monorepo)
 
 LexAI, Türkçe yargı kararları ve mevzuat üzerinde **hybrid arama (OpenSearch + Qdrant)** ve **RAG** (Retrieval-Augmented Generation) yaklaşımıyla çalışan; **FastAPI** tabanlı bir backend ve **Vite + React + TypeScript** tabanlı bir frontend içeren **modüler** bir LegalTech projesidir.  
 Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındırır.
