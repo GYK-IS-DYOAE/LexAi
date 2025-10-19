@@ -45,6 +45,8 @@ export const useAuthStore = create<AuthState>()(
           const token = data.access_token ?? null;
           if (!token) return false;
 
+          localStorage.setItem("token", token);
+
           // token'ı kaydet
           set({ token });
 
