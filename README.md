@@ -39,39 +39,39 @@ Bu repo, hem backend (FastAPI) hem de frontend’i (React-TS) birlikte barındı
 
 cd LexAi-Backend
 python -m venv .venv
-# Windows:
+### Windows:
 .venv\Scripts\activate
-# Linux/Mac:
+### Linux/Mac:
  source .venv/bin/activate
 
 pip install -r requirements.txt
 
-# Postgres
+### Postgres
 POSTGRES_USER=lexai
 POSTGRES_PASSWORD=lexai123
 POSTGRES_DB=lexai_db
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 
-# Vector / Search
+### Vector / Search
 QDRANT_HOST=localhost
 QDRANT_PORT=6333
 OS_HOST=localhost
 OS_PORT=9200
 
-# Ollama
+### Ollama
 OLLAMA_HOST=http://localhost:11434
 
-# Auth
+### Auth
 JWT_SECRET_KEY=change_me
 ACCESS_TOKEN_EXPIRE_MINUTES=1440
 
-# Veritabanını başlat 
+### Veritabanını başlat 
 python -m src.core.init_db Uvicorn ile çalıştır 
 uvicorn src.main:app --reload --port 8000 # Swagger: http://localhost:8000/docs Frontend
 
 
-#### Frontend
+### Frontend
 
 cd ../LexAi-Frontend
 
@@ -108,7 +108,7 @@ ollama pull qwen2.5:7b-instruct
 ## 4) Embedding ve İndeksleme (Retrieval Hazırlığı)
 
 1) Embedding üret
-# veriyi oku (örn. data/interim/*.jsonl) → Qdrant’a gönder
+#### veriyi oku (örn. data/interim/*.jsonl) → Qdrant’a gönder
 python -m src.retrieval.vector_embedding
 
 2) OpenSearch indeksle
