@@ -212,7 +212,7 @@ Prompt: prompt_builder.py yanıt biçimini kullanıcı-dostu yapar; JSON değil,
 **MIT License © 2025 — LexAI.**
 Bu yazılım hukuki danışmanlık yerine geçmez; yalnızca destek amaçlıdır.
 
-
+# http://72.61.180.58:3000 adresi ile sitemize erişebilirsiniz.
 ---
 
 <img width="1513" height="891" alt="1 1" src="https://github.com/user-attachments/assets/2b29b1c9-7e8e-41cb-955b-9ceb686a28f0" />
